@@ -19,6 +19,7 @@ target_sources(ffmpeg_cpp
     FILE_SET cxx_modules TYPE CXX_MODULES FILES
       "modules/codeccontext.ixx"
       "modules/codec_parameters.ixx"
+      "modules/dictionary.ixx"
       "modules/error.ixx"
       "modules/frame.ixx"
       "modules/input_format_context.ixx"
@@ -34,6 +35,9 @@ target_sources(ffmpeg_cpp
     "src/avutil.hpp"
     "src/codeccontext.cpp"
     "src/codec_par.hpp"
+    "src/dict.hpp"
+    "src/dictionary.cpp"
+    "src/dictionary.hpp"
     "src/error.cpp"
     "src/frame.cpp"
     "src/frame.hpp"
