@@ -1,7 +1,7 @@
+#include <catch2/catch_test_macros.hpp>
+
 import ffmpeg.rational;
 import ffmpeg.rational.io;
-
-#include <catch2/catch_test_macros.hpp>
 
 namespace
 {
