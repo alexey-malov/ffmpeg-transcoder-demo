@@ -76,10 +76,7 @@ public:
 	// Clear/free contents
 	void Clear() noexcept
 	{
-		if (m_dict) [[likely]]
-		{
-			av_dict_free(&m_dict);
-		}
+		av_dict_free(&m_dict);
 	}
 
 private:
