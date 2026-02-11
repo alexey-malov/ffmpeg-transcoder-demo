@@ -1,0 +1,72 @@
+module;
+
+#include "../../ffmpeg_cpp/src/avutil.hpp"
+#include "../../ffmpeg_cpp/src/codec_par.hpp"
+
+export module mm_pipeline.demuxer;
+
+import ffmpeg.input_format_context;
+import ffmpeg.packet;
+import ffmpeg.rational;
+import mm_pipeline.error;
+
+namespace mm_pipeline
+{
+
+export struct EndOfStream
+{
+};
+
+export struct Packet
+{
+	ffmpeg::Packet pkt;
+	ffmpeg::Rational timeBase;
+};
+
+export using DemuxOutput = std::variant<EndOfStream, Packet>;
+
+export struct StreamInfo
+{
+	int index = -1;
+	AVMediaType type = AVMEDIA_TYPE_UNKNOWN;
+	const AVCodecParameters* codecPar = nullptr;
+	ffmpeg::Rational timeBase;
+};
+
+export class Demuxer
+{
+public:
+	explicit Demuxer(const char* url);
+
+	Demuxer(const Demuxer&) = delete;
+	Demuxer& operator=(const Demuxer&) = delete;
+
+	Demuxer(Demuxer&&) noexcept;
+	Demuxer& operator=(Demuxer&&) noexcept;
+
+	~Demuxer();
+
+	[[nodiscard]] std::expected<DemuxOutput, Error> TryRead();
+
+	[[nodiscard]] unsigned int GetStreamCount() const noexcept { return m_ctx->nb_streams; }
+
+	[[nodiscard]] StreamInfo GetStreamInfo(unsigned int index) const
+	{
+		if (index >= m_ctx->nb_streams)
+		{
+			throw Exception{ MakeError(ErrDomain::Demux, ErrorUnknown, "mm_pipeline::Demuxer::GetStreamInfo : invalid stream index") };
+		}
+		const auto& stream = *m_ctx->streams[index];
+		return StreamInfo{
+			.index = static_cast<int>(index),
+			.type = stream.codecpar->codec_type,
+			.codecPar = stream.codecpar,
+			.timeBase = ffmpeg::Rational{ stream.time_base },
+		};
+	}
+
+private:
+	ffmpeg::InputFormatContext m_ctx;
+};
+
+} // namespace mm_pipeline
