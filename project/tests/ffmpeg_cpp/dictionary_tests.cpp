@@ -1,9 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
-#include <cstring>
 
 import ffmpeg.dictionary;
 import ffmpeg.error;
-
+import std;
 
 // Need direct access to FFmpeg dict API for verification
 extern "C" {
@@ -14,6 +13,7 @@ namespace
 {
 constexpr auto kDictionaryTestTag = "[dictionary]";
 using ffmpeg::Dictionary;
+using namespace std::string_literals;
 } // namespace
 
 TEST_CASE("Dictionary default construction yields empty", kDictionaryTestTag)
@@ -47,7 +47,8 @@ TEST_CASE("Dictionary TrySet creates dictionary and stores value", kDictionaryTe
 	// Verify via FFmpeg API
 	AVDictionaryEntry* entry = av_dict_get(*d.Ptr(), "preset", nullptr, 0);
 	REQUIRE(entry != nullptr);
-	REQUIRE(std::strcmp(entry->value, "veryfast") == 0);
+	REQUIRE(entry->value != nullptr);
+	REQUIRE(std::string(entry->value) == "veryfast"s);
 }
 
 TEST_CASE("Dictionary TrySet with const char* value", kDictionaryTestTag)
@@ -59,7 +60,8 @@ TEST_CASE("Dictionary TrySet with const char* value", kDictionaryTestTag)
 
 	AVDictionaryEntry* entry = av_dict_get(*d.Ptr(), "codec", nullptr, 0);
 	REQUIRE(entry != nullptr);
-	REQUIRE(std::strcmp(entry->value, "h264") == 0);
+	REQUIRE(entry->value != nullptr);
+	REQUIRE(std::string(entry->value) == "h264"s);
 }
 
 TEST_CASE("Dictionary setting multiple keys", kDictionaryTestTag)
@@ -76,13 +78,16 @@ TEST_CASE("Dictionary setting multiple keys", kDictionaryTestTag)
 	AVDictionaryEntry* tune = av_dict_get(*d.Ptr(), "tune", nullptr, 0);
 
 	REQUIRE(crf != nullptr);
-	REQUIRE(std::strcmp(crf->value, "23") == 0);
+	REQUIRE(crf->value != nullptr);
+	REQUIRE(std::string(crf->value) == "23"s);
 
 	REQUIRE(preset != nullptr);
-	REQUIRE(std::strcmp(preset->value, "medium") == 0);
+	REQUIRE(preset->value != nullptr);
+	REQUIRE(std::string(preset->value) == "medium"s);
 
 	REQUIRE(tune != nullptr);
-	REQUIRE(std::strcmp(tune->value, "film") == 0);
+	REQUIRE(tune->value != nullptr);
+	REQUIRE(std::string(tune->value) == "film"s);
 }
 
 TEST_CASE("Dictionary TrySet with nullptr deletes key", kDictionaryTestTag)
@@ -128,7 +133,8 @@ TEST_CASE("Dictionary Clear releases the dictionary", kDictionaryTestTag)
 
 	AVDictionaryEntry* entry = av_dict_get(*d.Ptr(), "codec", nullptr, 0);
 	REQUIRE(entry != nullptr);
-	REQUIRE(std::strcmp(entry->value, "vp9") == 0);
+	REQUIRE(entry->value != nullptr);
+	REQUIRE(std::string(entry->value) == "vp9"s);
 }
 
 TEST_CASE("Dictionary move construction transfers ownership", kDictionaryTestTag)
@@ -146,9 +152,11 @@ TEST_CASE("Dictionary move construction transfers ownership", kDictionaryTestTag
 	AVDictionaryEntry* crf = av_dict_get(*b.Ptr(), "crf", nullptr, 0);
 
 	REQUIRE(preset != nullptr);
-	REQUIRE(std::strcmp(preset->value, "slow") == 0);
+	REQUIRE(preset->value != nullptr);
+	REQUIRE(std::string(preset->value) == "slow"s);
 	REQUIRE(crf != nullptr);
-	REQUIRE(std::strcmp(crf->value, "18") == 0);
+	REQUIRE(crf->value != nullptr);
+	REQUIRE(std::string(crf->value) == "18"s);
 
 	// Verify a is empty (moved-from state)
 	REQUIRE_FALSE(static_cast<bool>(a));
@@ -170,7 +178,8 @@ TEST_CASE("Dictionary move assignment transfers ownership and frees previous con
 	// Verify b has a's key
 	AVDictionaryEntry* preset = av_dict_get(*b.Ptr(), "preset", nullptr, 0);
 	REQUIRE(preset != nullptr);
-	REQUIRE(std::strcmp(preset->value, "slow") == 0);
+	REQUIRE(preset->value != nullptr);
+	REQUIRE(std::string(preset->value) == "slow"s);
 
 	// Verify b's old key is gone (freed)
 	AVDictionaryEntry* crf = av_dict_get(*b.Ptr(), "crf", nullptr, 0);
@@ -189,7 +198,8 @@ TEST_CASE("Dictionary Ptr() stability - FFmpeg can modify via Ptr()", kDictionar
 	// Verify initial value
 	AVDictionaryEntry* entry = av_dict_get(*d.Ptr(), "preset", nullptr, 0);
 	REQUIRE(entry != nullptr);
-	REQUIRE(std::strcmp(entry->value, "fast") == 0);
+	REQUIRE(entry->value != nullptr);
+	REQUIRE(std::string(entry->value) == "fast"s);
 
 	// Modify directly via FFmpeg API using Ptr()
 	int ret = av_dict_set(d.Ptr(), "preset", "slow", 0);
@@ -198,7 +208,8 @@ TEST_CASE("Dictionary Ptr() stability - FFmpeg can modify via Ptr()", kDictionar
 	// Verify wrapper sees the change
 	entry = av_dict_get(*d.Ptr(), "preset", nullptr, 0);
 	REQUIRE(entry != nullptr);
-	REQUIRE(std::strcmp(entry->value, "slow") == 0);
+	REQUIRE(entry->value != nullptr);
+	REQUIRE(std::string(entry->value) == "slow"s);
 
 	// Add another key via FFmpeg API
 	ret = av_dict_set(d.Ptr(), "tune", "zerolatency", 0);
@@ -207,7 +218,8 @@ TEST_CASE("Dictionary Ptr() stability - FFmpeg can modify via Ptr()", kDictionar
 	// Verify it's visible through wrapper
 	entry = av_dict_get(*d.Ptr(), "tune", nullptr, 0);
 	REQUIRE(entry != nullptr);
-	REQUIRE(std::strcmp(entry->value, "zerolatency") == 0);
+	REQUIRE(entry->value != nullptr);
+	REQUIRE(std::string(entry->value) == "zerolatency"s);
 }
 
 TEST_CASE("Dictionary TrySet with empty string value", kDictionaryTestTag)
@@ -221,8 +233,9 @@ TEST_CASE("Dictionary TrySet with empty string value", kDictionaryTestTag)
 	AVDictionaryEntry* entry = av_dict_get(*d.Ptr(), "key", nullptr, 0);
 	REQUIRE(entry != nullptr);
 	REQUIRE(entry->value != nullptr);
-	REQUIRE(std::strcmp(entry->value, "") == 0);
-	REQUIRE(std::strlen(entry->value) == 0);
+	const std::string v{ entry->value };
+	REQUIRE(v == ""s);
+	REQUIRE(v.empty());
 }
 
 TEST_CASE("Dictionary Set throws on error", kDictionaryTestTag)
@@ -234,7 +247,8 @@ TEST_CASE("Dictionary Set throws on error", kDictionaryTestTag)
 
 	AVDictionaryEntry* entry = av_dict_get(*d.Ptr(), "preset", nullptr, 0);
 	REQUIRE(entry != nullptr);
-	REQUIRE(std::strcmp(entry->value, "fast") == 0);
+	REQUIRE(entry->value != nullptr);
+	REQUIRE(std::string(entry->value) == "fast"s);
 }
 
 TEST_CASE("Dictionary destructor frees resources", kDictionaryTestTag)
@@ -288,11 +302,13 @@ TEST_CASE("Dictionary with special characters in keys and values", kDictionaryTe
 
 	AVDictionaryEntry* entry1 = av_dict_get(*d.Ptr(), "key-with-dashes", nullptr, 0);
 	REQUIRE(entry1 != nullptr);
-	REQUIRE(std::strcmp(entry1->value, "value_with_underscores") == 0);
+	REQUIRE(entry1->value != nullptr);
+	REQUIRE(std::string(entry1->value) == "value_with_underscores"s);
 
 	AVDictionaryEntry* entry2 = av_dict_get(*d.Ptr(), "key.with.dots", nullptr, 0);
 	REQUIRE(entry2 != nullptr);
-	REQUIRE(std::strcmp(entry2->value, "value:with:colons") == 0);
+	REQUIRE(entry2->value != nullptr);
+	REQUIRE(std::string(entry2->value) == "value:with:colons"s);
 }
 
 TEST_CASE("Dictionary overwriting existing key", kDictionaryTestTag)
@@ -303,12 +319,14 @@ TEST_CASE("Dictionary overwriting existing key", kDictionaryTestTag)
 
 	AVDictionaryEntry* entry = av_dict_get(*d.Ptr(), "preset", nullptr, 0);
 	REQUIRE(entry != nullptr);
-	REQUIRE(std::strcmp(entry->value, "fast") == 0);
+	REQUIRE(entry->value != nullptr);
+	REQUIRE(std::string(entry->value) == "fast"s);
 
 	// Overwrite with new value
 	REQUIRE(d.TrySet("preset", "slow").has_value());
 
 	entry = av_dict_get(*d.Ptr(), "preset", nullptr, 0);
 	REQUIRE(entry != nullptr);
-	REQUIRE(std::strcmp(entry->value, "slow") == 0);
+	REQUIRE(entry->value != nullptr);
+	REQUIRE(std::string(entry->value) == "slow"s);
 }
