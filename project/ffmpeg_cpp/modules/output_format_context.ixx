@@ -41,6 +41,12 @@ public:
 		Check(TryWritePacket(packet));
 	}
 
+	[[nodiscard]] std::expected<void, Error> TryInterleavedWritePacket(AVPacket& packet) noexcept;
+	void InterleavedWritePacket(AVPacket& packet)
+	{
+		Check(TryInterleavedWritePacket(packet));
+	}
+
 	[[nodiscard]] std::expected<void, Error> TryWriteTrailer() noexcept;
 	void WriteTrailer()
 	{

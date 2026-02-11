@@ -78,9 +78,9 @@ void Muxer::WritePacket(TrackId track, AVPacket& packet, AVRational timeBase)
 	packet.stream_index = track.m_index;
 	av_packet_rescale_ts(&packet, timeBase, ti.outTimeBase);
 
-	if (auto r = m_ctx.TryWritePacket(packet); !r) [[unlikely]]
+	if (auto r = m_ctx.TryInterleavedWritePacket(packet); !r) [[unlikely]]
 	{
-		ThrowMuxerError("mm_pipeline::Muxer::WritePacket : TryWritePacket failed", r.error().code);
+		ThrowMuxerError("mm_pipeline::Muxer::WritePacket : TryInterleavedWritePacket failed", r.error().code);
 	}
 }
 

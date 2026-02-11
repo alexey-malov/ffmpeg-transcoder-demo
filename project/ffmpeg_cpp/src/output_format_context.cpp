@@ -122,6 +122,24 @@ std::expected<void, Error> OutputFormatContext::TryWritePacket(AVPacket& packet)
 	return {};
 }
 
+std::expected<void, Error> OutputFormatContext::TryInterleavedWritePacket(AVPacket& packet) noexcept
+{
+	assert(m_ctx); // We must not use a moved-from OutputFormatContext
+	if (m_state.closed) [[unlikely]]
+		return std::unexpected(MakeFFmpegError(AVERROR(EINVAL), "OutputFormatContext::TryInterleavedWritePacket(closed)"));
+
+	if (!m_state.headerWritten)
+	{
+		return std::unexpected(MakeFFmpegError(AVERROR(EINVAL), "TryInterleavedWritePacket called before header"));
+	}
+
+	if (int ret = av_interleaved_write_frame(m_ctx.get(), &packet); ret < 0) [[unlikely]]
+	{
+		return std::unexpected(MakeFFmpegError(ret, "av_interleaved_write_frame"));
+	}
+	return {};
+}
+
 std::expected<void, Error> OutputFormatContext::TryWriteTrailer() noexcept
 {
 	assert(m_ctx); // We must not use a moved-from OutputFormatContext
