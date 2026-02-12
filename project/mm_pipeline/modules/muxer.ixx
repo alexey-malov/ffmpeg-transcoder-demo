@@ -1,6 +1,7 @@
 module;
 
 #include "../../ffmpeg_cpp/src/codec_par.hpp"
+#include "../../ffmpeg_cpp/src/avformat.hpp"
 
 export module mm_pipeline.muxer;
 import ffmpeg.output_format_context;
@@ -33,10 +34,12 @@ public:
 
 	void Close();
 
+	[[nodiscard]] AVRational GetTrackTimeBase(TrackId track) const noexcept;
+
 private:
 	struct TrackInfo
 	{
-		AVRational outTimeBase{};
+		AVStream* stream = nullptr;
 	};
 
 	struct State
@@ -52,6 +55,7 @@ private:
 
 	ffmpeg::OutputFormatContext m_ctx;
 	std::vector<TrackInfo> m_tracks;
+	State m_state;
 };
 
 } // namespace mm_pipeline

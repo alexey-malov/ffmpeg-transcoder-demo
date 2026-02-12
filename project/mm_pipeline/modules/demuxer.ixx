@@ -31,6 +31,7 @@ export struct StreamInfo
 	AVMediaType type = AVMEDIA_TYPE_UNKNOWN;
 	const AVCodecParameters* codecPar = nullptr;
 	ffmpeg::Rational timeBase;
+	ffmpeg::Rational avgFrameRate;
 };
 
 export class Demuxer
@@ -57,11 +58,20 @@ public:
 			throw Exception{ MakeError(ErrDomain::Demux, ErrorUnknown, "mm_pipeline::Demuxer::GetStreamInfo : invalid stream index") };
 		}
 		const auto& stream = *m_ctx->streams[index];
+		
+		// Use avg_frame_rate if valid, otherwise fallback to r_frame_rate
+		ffmpeg::Rational frameRate{ stream.avg_frame_rate };
+		if (frameRate.Num() <= 0 || frameRate.Den() <= 0)
+		{
+			frameRate = ffmpeg::Rational{ stream.r_frame_rate };
+		}
+		
 		return StreamInfo{
 			.index = static_cast<int>(index),
 			.type = stream.codecpar->codec_type,
 			.codecPar = stream.codecpar,
 			.timeBase = ffmpeg::Rational{ stream.time_base },
+			.avgFrameRate = frameRate,
 		};
 	}
 

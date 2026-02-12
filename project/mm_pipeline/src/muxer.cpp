@@ -58,7 +58,7 @@ Muxer::TrackId Muxer::AddTrack(const AVCodecParameters& codecPar, ffmpeg::Ration
 	{
 		m_tracks.resize(i + 1);
 	}
-	m_tracks[index] = TrackInfo{ .outTimeBase = outTimeBase.ToAV() };
+	m_tracks[index] = TrackInfo{ .stream = stream };
 
 	return TrackId{ index };
 }
@@ -69,14 +69,18 @@ void Muxer::WriteHeader(AVDictionary** options)
 	{
 		ThrowMuxerError("mm_pipeline::Muxer::WriteHeader : TryWriteHeader failed", r.error().code);
 	}
+	m_state.headerWritten = true;
 }
 
 void Muxer::WritePacket(TrackId track, AVPacket& packet, AVRational timeBase)
 {
+	assert(m_state.headerWritten && "WriteHeader must be called before WritePacket");
+
 	auto& ti = m_tracks.at(track.m_index);
+	assert(ti.stream != nullptr && "Invalid track stream pointer");
 
 	packet.stream_index = track.m_index;
-	av_packet_rescale_ts(&packet, timeBase, ti.outTimeBase);
+	av_packet_rescale_ts(&packet, timeBase, ti.stream->time_base);
 
 	if (auto r = m_ctx.TryInterleavedWritePacket(packet); !r) [[unlikely]]
 	{
@@ -88,6 +92,13 @@ void Muxer::Close()
 {
 	assert(m_ctx.get() != nullptr);
 	m_ctx.Close();
+}
+
+AVRational Muxer::GetTrackTimeBase(TrackId track) const noexcept
+{
+	const auto& ti = m_tracks.at(track.m_index);
+	assert(ti.stream != nullptr && "Invalid track stream pointer");
+	return ti.stream->time_base;
 }
 
 } // namespace mm_pipeline
