@@ -36,7 +36,7 @@ target_include_directories(mm_pipeline
 
 # Если в public headers media_pipeline используются типы ffmpeg_cpp,
 # то зависимость должна быть PUBLIC.
-target_link_libraries(mm_pipeline PRIVATE
+target_link_libraries(mm_pipeline PUBLIC
   My::ffmpeg_cpp
 )
 

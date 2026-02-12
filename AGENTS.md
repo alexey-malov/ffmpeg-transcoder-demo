@@ -2,6 +2,24 @@
 
 This guide provides coding agents with essential information about building, testing, and contributing to this C++23 FFmpeg wrapper project.
 
+## Quick Reference
+
+**Working Directory**: All commands assume you're in `/mnt/source/repos/cpp-russia-speech/project/`
+
+```bash
+# Build
+cmake -B out/build/x64-Debug -S . && cmake --build out/build/x64-Debug
+
+# Run all tests
+ctest --test-dir out/build/x64-Debug --output-on-failure
+
+# Run single test (Catch2 filter)
+out/build/x64-Debug/tests/ffmpeg_cpp/ffmpeg_cpp_tests.exe "Rational addition"
+
+# Format code
+clang-format -i <file>
+```
+
 ## Project Overview
 
 This is a modern C++23 project that wraps FFmpeg libraries using C++ modules (.ixx files). The project consists of:

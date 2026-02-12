@@ -1,11 +1,11 @@
 function(enable_ffmpeg_runtime test_target)
-  # Путь к bin, где лежат DLL (из импортированной цели)
+  # РџСѓС‚СЊ Рє bin, РіРґРµ Р»РµР¶Р°С‚ DLL (РёР· РёРјРїРѕСЂС‚РёСЂРѕРІР°РЅРЅРѕР№ С†РµР»Рё)
   get_target_property(_avutil_dll FFmpeg::avutil IMPORTED_LOCATION)
   get_filename_component(_ffmpeg_bin "${_avutil_dll}" DIRECTORY)
 
-  # 1) Для catch_discover_tests уже собранных тестов: добавляем DL_PATHS через свойство
-  # Но проще: ты передаёшь DL_PATHS прямо в catch_discover_tests там, где вызываешь.
-  # Здесь сделаем только копирование DLL:
+  # 1) Р”Р»СЏ catch_discover_tests СѓР¶Рµ СЃРѕР±СЂР°РЅРЅС‹С… С‚РµСЃС‚РѕРІ: РґРѕР±Р°РІР»СЏРµРј DL_PATHS С‡РµСЂРµР· СЃРІРѕР№СЃС‚РІРѕ
+  # РќРѕ РїСЂРѕС‰Рµ: С‚С‹ РїРµСЂРµРґР°С‘С€СЊ DL_PATHS РїСЂСЏРјРѕ РІ catch_discover_tests С‚Р°Рј, РіРґРµ РІС‹Р·С‹РІР°РµС€СЊ.
+  # Р—РґРµСЃСЊ СЃРґРµР»Р°РµРј С‚РѕР»СЊРєРѕ РєРѕРїРёСЂРѕРІР°РЅРёРµ DLL:
 
   foreach(dep IN ITEMS FFmpeg::avutil FFmpeg::avcodec FFmpeg::avformat FFmpeg::swresample)
     add_custom_command(TARGET ${test_target} POST_BUILD
