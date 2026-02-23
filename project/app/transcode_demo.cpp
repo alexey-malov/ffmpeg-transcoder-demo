@@ -34,9 +34,6 @@ import ffmpeg.error;
 #include "../ffmpeg_cpp/src/avcodec.hpp"
 #include "../ffmpeg_cpp/src/avformat.hpp"
 
-// Don't use namespace-wide using directives to avoid ambiguity
-// (both namespaces have Packet, Error, Exception types)
-
 // Helper to find stream indices
 struct StreamIndices
 {
@@ -70,13 +67,96 @@ StreamIndices FindStreams(const mm_pipeline::Demuxer& demuxer)
 	return indices;
 }
 
+bool TrySendVideoFrameToEncoder(ffmpeg::Frame& frame, mm_pipeline::Encoder& encoder,
+	mm_pipeline::Muxer& muxer,
+	mm_pipeline::Muxer::TrackId track,
+	int& debugPacketCount)
+{
+	auto encoderCtx = encoder.Context().get();
+
+	// Send frame to encoder
+	while (true)
+	{
+		auto sendResult = encoder.TrySend(frame);
+		if (!sendResult)
+		{
+			std::cerr << "Encoder TrySend error: " << sendResult.error().code << "\n";
+			return false;
+		}
+		if (*sendResult == ffmpeg::SendResult::Accepted || *sendResult == ffmpeg::SendResult::Flushed)
+			return true;
+		// NeedReceive: drain encoder
+		ffmpeg::Packet pkt;
+		auto encRecvResult = encoder.TryReceive(pkt);
+		if (!encRecvResult)
+		{
+			std::cerr << "Encoder TryReceive error: " << encRecvResult.error().code << "\n";
+			return false;
+		}
+		if (*encRecvResult == ffmpeg::ReceiveResult::Produced)
+		{
+			// Use encoder's pkt_timebase for correct timestamp rescaling
+			muxer.WritePacket(track, *pkt, encoderCtx->pkt_timebase);
+
+			// Debug logging for first few packets
+			if (debugPacketCount < 10)
+			{
+				std::cout << "Video pkt pts=" << pkt->pts
+						  << " dts=" << pkt->dts
+						  << " duration=" << pkt->duration << "\n";
+				++debugPacketCount;
+			}
+		}
+		else if (*encRecvResult == ffmpeg::ReceiveResult::EndOfStream)
+		{
+			return true;
+		}
+	}
+}
+
+void DrainVideoEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_pipeline::Muxer::TrackId track, int& debugPacketCount)
+{
+	auto encoderCtx = encoder.Context().get();
+
+	while (true)
+	{
+		ffmpeg::Packet pkt;
+		auto recvResult = encoder.TryReceive(pkt);
+		if (!recvResult)
+		{
+			std::cerr << "Encoder TryReceive error: " << recvResult.error().code << "\n";
+			break;
+		}
+		if (*recvResult == ffmpeg::ReceiveResult::Produced)
+		{
+			// Use encoder's pkt_timebase for correct timestamp rescaling
+			muxer.WritePacket(track, *pkt, encoderCtx->pkt_timebase);
+			// Debug logging for first few packets
+			if (debugPacketCount < 10)
+			{
+				std::cout << "Video pkt pts=" << pkt->pts
+						  << " dts=" << pkt->dts
+						  << " duration=" << pkt->duration << "\n";
+				++debugPacketCount;
+			}
+		}
+		else if (*recvResult == ffmpeg::ReceiveResult::EndOfStream)
+		{
+			break;
+		}
+		else
+		{
+			break;
+		}
+	}
+}
+
 // Helper to drain video decoder → encoder → muxer pipeline
 void DrainVideoDecoder(
 	mm_pipeline::Decoder& decoder,
 	mm_pipeline::Encoder& encoder,
 	mm_pipeline::Muxer& muxer,
 	mm_pipeline::Muxer::TrackId track,
-	AVCodecContext* encoderCtx,
 	int64_t& videoFrameCounter,
 	int& debugPacketCount)
 {
@@ -95,72 +175,75 @@ void DrainVideoDecoder(
 			break;
 		// VIDEO: Set PTS for encoder (simple scheme: frame counter in 1/fps timebase)
 		frame->pts = videoFrameCounter++;
-		// Send frame to encoder
-		while (true)
-		{
-			auto sendResult = encoder.TrySend(frame);
-			if (!sendResult)
-			{
-				std::cerr << "Encoder TrySend error: " << sendResult.error().code << "\n";
-				return;
-			}
-			if (*sendResult == ffmpeg::SendResult::Accepted || *sendResult == ffmpeg::SendResult::Flushed)
-				break;
-			// NeedReceive: drain encoder
-			ffmpeg::Packet pkt;
-			auto encRecvResult = encoder.TryReceive(pkt);
-			if (!encRecvResult)
-			{
-				std::cerr << "Encoder TryReceive error: " << encRecvResult.error().code << "\n";
-				return;
-			}
-			if (*encRecvResult == ffmpeg::ReceiveResult::Produced)
-			{
-				// Use encoder's pkt_timebase for correct timestamp rescaling
-				muxer.WritePacket(track, *pkt, encoderCtx->pkt_timebase);
 
-				// Debug logging for first few packets
-				if (debugPacketCount < 10)
-				{
-					std::cout << "Video pkt pts=" << pkt->pts
-							  << " dts=" << pkt->dts
-							  << " duration=" << pkt->duration << "\n";
-					++debugPacketCount;
-				}
-			}
-			else if (*encRecvResult == ffmpeg::ReceiveResult::EndOfStream)
-			{
-				break;
-			}
+		if (!TrySendVideoFrameToEncoder(frame, encoder, muxer, track, debugPacketCount))
+		{
+			return;
 		}
-		// Drain encoder after sending frame
-		while (true)
-		{
-			ffmpeg::Packet pkt;
-			auto encRecvResult = encoder.TryReceive(pkt);
-			if (!encRecvResult)
-			{
-				std::cerr << "Encoder TryReceive error: " << encRecvResult.error().code << "\n";
-				break;
-			}
-			if (*encRecvResult == ffmpeg::ReceiveResult::Produced)
-			{
-				// Use encoder's pkt_timebase for correct timestamp rescaling
-				muxer.WritePacket(track, *pkt, encoderCtx->pkt_timebase);
 
-				// Debug logging for first few packets
-				if (debugPacketCount < 10)
-				{
-					std::cout << "Video pkt pts=" << pkt->pts
-							  << " dts=" << pkt->dts
-							  << " duration=" << pkt->duration << "\n";
-					++debugPacketCount;
-				}
-			}
-			else
-			{
-				break;
-			}
+		DrainVideoEncoder(encoder, muxer, track, debugPacketCount);
+	}
+}
+
+bool TrySendAudioFrameToEncoder(ffmpeg::Frame& frame, mm_pipeline::Encoder& encoder,
+	mm_pipeline::Muxer& muxer,
+	mm_pipeline::Muxer::TrackId track)
+{
+	auto encoderCtx = encoder.Context().get();
+	// Send frame to encoder
+	while (true)
+	{
+		auto sendResult = encoder.TrySend(frame);
+		if (!sendResult)
+		{
+			std::cerr << "Encoder TrySend error: " << sendResult.error().code << "\n";
+			return false;
+		}
+		if (*sendResult == ffmpeg::SendResult::Accepted || *sendResult == ffmpeg::SendResult::Flushed)
+			break;
+		// NeedReceive: drain encoder
+		ffmpeg::Packet pkt;
+		auto encRecvResult = encoder.TryReceive(pkt);
+		if (!encRecvResult)
+		{
+			std::cerr << "Encoder TryReceive error: " << encRecvResult.error().code << "\n";
+			return false;
+		}
+		if (*encRecvResult == ffmpeg::ReceiveResult::Produced)
+		{
+			// Use encoder's pkt_timebase for correct timestamp rescaling
+			muxer.WritePacket(track, *pkt, encoderCtx->pkt_timebase);
+		}
+		else if (*encRecvResult == ffmpeg::ReceiveResult::EndOfStream)
+		{
+			break;
+		}
+	}
+	return true;
+}
+
+void DrainAudioEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_pipeline::Muxer::TrackId track)
+{
+	auto encoderCtx = encoder.Context().get();
+
+	// Drain encoder after sending frame
+	while (true)
+	{
+		ffmpeg::Packet pkt;
+		auto encRecvResult = encoder.TryReceive(pkt);
+		if (!encRecvResult)
+		{
+			std::cerr << "Encoder TryReceive error: " << encRecvResult.error().code << "\n";
+			break;
+		}
+		if (*encRecvResult == ffmpeg::ReceiveResult::Produced)
+		{
+			// Use encoder's pkt_timebase for correct timestamp rescaling
+			muxer.WritePacket(track, *pkt, encoderCtx->pkt_timebase);
+		}
+		else
+		{
+			break;
 		}
 	}
 }
@@ -171,7 +254,6 @@ void DrainAudioDecoder(
 	mm_pipeline::Encoder& encoder,
 	mm_pipeline::Muxer& muxer,
 	mm_pipeline::Muxer::TrackId track,
-	AVCodecContext* encoderCtx,
 	int64_t& audioPtsSamples,
 	int64_t& audioFrameCounter)
 {
@@ -192,60 +274,18 @@ void DrainAudioDecoder(
 		frame->pts = audioPtsSamples;
 		audioPtsSamples += frame->nb_samples; // CRITICAL: advance by actual samples
 		++audioFrameCounter; // Track frame count separately
-		// Send frame to encoder
-		while (true)
+
+		if (!TrySendAudioFrameToEncoder(frame, encoder, muxer, track))
 		{
-			auto sendResult = encoder.TrySend(frame);
-			if (!sendResult)
-			{
-				std::cerr << "Encoder TrySend error: " << sendResult.error().code << "\n";
-				return;
-			}
-			if (*sendResult == ffmpeg::SendResult::Accepted || *sendResult == ffmpeg::SendResult::Flushed)
-				break;
-			// NeedReceive: drain encoder
-			ffmpeg::Packet pkt;
-			auto encRecvResult = encoder.TryReceive(pkt);
-			if (!encRecvResult)
-			{
-				std::cerr << "Encoder TryReceive error: " << encRecvResult.error().code << "\n";
-				return;
-			}
-			if (*encRecvResult == ffmpeg::ReceiveResult::Produced)
-			{
-				// Use encoder's pkt_timebase for correct timestamp rescaling
-				muxer.WritePacket(track, *pkt, encoderCtx->pkt_timebase);
-			}
-			else if (*encRecvResult == ffmpeg::ReceiveResult::EndOfStream)
-			{
-				break;
-			}
+			return;
 		}
-		// Drain encoder after sending frame
-		while (true)
-		{
-			ffmpeg::Packet pkt;
-			auto encRecvResult = encoder.TryReceive(pkt);
-			if (!encRecvResult)
-			{
-				std::cerr << "Encoder TryReceive error: " << encRecvResult.error().code << "\n";
-				break;
-			}
-			if (*encRecvResult == ffmpeg::ReceiveResult::Produced)
-			{
-				// Use encoder's pkt_timebase for correct timestamp rescaling
-				muxer.WritePacket(track, *pkt, encoderCtx->pkt_timebase);
-			}
-			else
-			{
-				break;
-			}
-		}
+
+		DrainAudioEncoder(encoder, muxer, track);
 	}
 }
 
 // Helper to flush encoder
-void FlushEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_pipeline::Muxer::TrackId track, AVCodecContext* encoderCtx)
+void FlushEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_pipeline::Muxer::TrackId track)
 {
 	ffmpeg::Frame emptyFrame{ nullptr };
 	auto sendResult = encoder.TrySend(emptyFrame);
@@ -254,6 +294,8 @@ void FlushEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_p
 		std::cerr << "Encoder flush TrySend error: " << sendResult.error().code << "\n";
 		return;
 	}
+
+	auto encoderCtx = encoder.Context().get();
 
 	// Drain encoder
 	while (true)
@@ -468,19 +510,19 @@ int main(int argc, char* argv[])
 				auto videoSendResult = videoDec.TrySend(flushPkt);
 				if (videoSendResult)
 				{
-					DrainVideoDecoder(videoDec, videoEnc, muxer, videoTrack, videoCtx, videoFrameCounter, videoDebugPacketCount);
+					DrainVideoDecoder(videoDec, videoEnc, muxer, videoTrack, videoFrameCounter, videoDebugPacketCount);
 				}
 
 				// Flush audio decoder
 				auto audioSendResult = audioDec.TrySend(flushPkt);
 				if (audioSendResult)
 				{
-					DrainAudioDecoder(audioDec, audioEnc, muxer, audioTrack, audioCtx, audioPtsSamples, audioFrameCounter);
+					DrainAudioDecoder(audioDec, audioEnc, muxer, audioTrack, audioPtsSamples, audioFrameCounter);
 				}
 
 				// Flush encoders
-				FlushEncoder(videoEnc, muxer, videoTrack, videoCtx);
-				FlushEncoder(audioEnc, muxer, audioTrack, audioCtx);
+				FlushEncoder(videoEnc, muxer, videoTrack);
+				FlushEncoder(audioEnc, muxer, audioTrack);
 
 				break;
 			}
@@ -508,11 +550,11 @@ int main(int argc, char* argv[])
 						break;
 
 					// NeedReceive: drain decoder
-					DrainVideoDecoder(videoDec, videoEnc, muxer, videoTrack, videoCtx, videoFrameCounter, videoDebugPacketCount);
+					DrainVideoDecoder(videoDec, videoEnc, muxer, videoTrack, videoFrameCounter, videoDebugPacketCount);
 				}
 
 				// Drain decoder after sending
-				DrainVideoDecoder(videoDec, videoEnc, muxer, videoTrack, videoCtx, videoFrameCounter, videoDebugPacketCount);
+				DrainVideoDecoder(videoDec, videoEnc, muxer, videoTrack, videoFrameCounter, videoDebugPacketCount);
 			}
 			else if (streamIndex == indices.audio)
 			{
@@ -530,11 +572,11 @@ int main(int argc, char* argv[])
 						break;
 
 					// NeedReceive: drain decoder
-					DrainAudioDecoder(audioDec, audioEnc, muxer, audioTrack, audioCtx, audioPtsSamples, audioFrameCounter);
+					DrainAudioDecoder(audioDec, audioEnc, muxer, audioTrack, audioPtsSamples, audioFrameCounter);
 				}
 
 				// Drain decoder after sending
-				DrainAudioDecoder(audioDec, audioEnc, muxer, audioTrack, audioCtx, audioPtsSamples, audioFrameCounter);
+				DrainAudioDecoder(audioDec, audioEnc, muxer, audioTrack, audioPtsSamples, audioFrameCounter);
 			}
 
 			if (packetCount % 100 == 0)
