@@ -69,8 +69,7 @@ StreamIndices FindStreams(const mm_pipeline::Demuxer& demuxer)
 
 bool TrySendVideoFrameToEncoder(ffmpeg::Frame& frame, mm_pipeline::Encoder& encoder,
 	mm_pipeline::Muxer& muxer,
-	mm_pipeline::Muxer::TrackId track,
-	int& debugPacketCount)
+	mm_pipeline::Muxer::TrackId track)
 {
 	auto encoderCtx = encoder.Context().get();
 
@@ -97,15 +96,6 @@ bool TrySendVideoFrameToEncoder(ffmpeg::Frame& frame, mm_pipeline::Encoder& enco
 		{
 			// Use encoder's pkt_timebase for correct timestamp rescaling
 			muxer.WritePacket(track, *pkt, encoderCtx->pkt_timebase);
-
-			// Debug logging for first few packets
-			if (debugPacketCount < 10)
-			{
-				std::cout << "Video pkt pts=" << pkt->pts
-						  << " dts=" << pkt->dts
-						  << " duration=" << pkt->duration << "\n";
-				++debugPacketCount;
-			}
 		}
 		else if (*encRecvResult == ffmpeg::ReceiveResult::EndOfStream)
 		{
@@ -114,7 +104,7 @@ bool TrySendVideoFrameToEncoder(ffmpeg::Frame& frame, mm_pipeline::Encoder& enco
 	}
 }
 
-void DrainVideoEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_pipeline::Muxer::TrackId track, int& debugPacketCount)
+void DrainVideoEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_pipeline::Muxer::TrackId track)
 {
 	auto encoderCtx = encoder.Context().get();
 
@@ -131,14 +121,6 @@ void DrainVideoEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer,
 		{
 			// Use encoder's pkt_timebase for correct timestamp rescaling
 			muxer.WritePacket(track, *pkt, encoderCtx->pkt_timebase);
-			// Debug logging for first few packets
-			if (debugPacketCount < 10)
-			{
-				std::cout << "Video pkt pts=" << pkt->pts
-						  << " dts=" << pkt->dts
-						  << " duration=" << pkt->duration << "\n";
-				++debugPacketCount;
-			}
 		}
 		else if (*recvResult == ffmpeg::ReceiveResult::EndOfStream)
 		{
@@ -157,8 +139,7 @@ void DrainVideoDecoder(
 	mm_pipeline::Encoder& encoder,
 	mm_pipeline::Muxer& muxer,
 	mm_pipeline::Muxer::TrackId track,
-	int64_t& videoFrameCounter,
-	int& debugPacketCount)
+	int64_t& videoFrameCounter)
 {
 	ffmpeg::Frame frame;
 	while (true)
@@ -176,12 +157,12 @@ void DrainVideoDecoder(
 		// VIDEO: Set PTS for encoder (simple scheme: frame counter in 1/fps timebase)
 		frame->pts = videoFrameCounter++;
 
-		if (!TrySendVideoFrameToEncoder(frame, encoder, muxer, track, debugPacketCount))
+		if (!TrySendVideoFrameToEncoder(frame, encoder, muxer, track))
 		{
 			return;
 		}
 
-		DrainVideoEncoder(encoder, muxer, track, debugPacketCount);
+		DrainVideoEncoder(encoder, muxer, track);
 	}
 }
 
@@ -486,7 +467,6 @@ int main(int argc, char* argv[])
 		int64_t audioPtsSamples = 0;
 		int64_t audioFrameCounter = 0;
 		int packetCount = 0;
-		int videoDebugPacketCount = 0; // For debug logging of first 10 video packets
 
 		while (true)
 		{
@@ -510,7 +490,7 @@ int main(int argc, char* argv[])
 				auto videoSendResult = videoDec.TrySend(flushPkt);
 				if (videoSendResult)
 				{
-					DrainVideoDecoder(videoDec, videoEnc, muxer, videoTrack, videoFrameCounter, videoDebugPacketCount);
+					DrainVideoDecoder(videoDec, videoEnc, muxer, videoTrack, videoFrameCounter);
 				}
 
 				// Flush audio decoder
@@ -550,11 +530,11 @@ int main(int argc, char* argv[])
 						break;
 
 					// NeedReceive: drain decoder
-					DrainVideoDecoder(videoDec, videoEnc, muxer, videoTrack, videoFrameCounter, videoDebugPacketCount);
+					DrainVideoDecoder(videoDec, videoEnc, muxer, videoTrack, videoFrameCounter);
 				}
 
 				// Drain decoder after sending
-				DrainVideoDecoder(videoDec, videoEnc, muxer, videoTrack, videoFrameCounter, videoDebugPacketCount);
+				DrainVideoDecoder(videoDec, videoEnc, muxer, videoTrack, videoFrameCounter);
 			}
 			else if (streamIndex == indices.audio)
 			{
