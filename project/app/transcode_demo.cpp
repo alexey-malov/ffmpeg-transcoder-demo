@@ -235,8 +235,7 @@ void DrainAudioDecoder(
 	mm_pipeline::Encoder& encoder,
 	mm_pipeline::Muxer& muxer,
 	mm_pipeline::Muxer::TrackId track,
-	int64_t& audioPtsSamples,
-	int64_t& audioFrameCounter)
+	int64_t& audioPtsSamples)
 {
 	ffmpeg::Frame frame;
 	while (true)
@@ -254,7 +253,6 @@ void DrainAudioDecoder(
 		// AUDIO: Set PTS in samples (time_base = 1/sample_rate)
 		frame->pts = audioPtsSamples;
 		audioPtsSamples += frame->nb_samples; // CRITICAL: advance by actual samples
-		++audioFrameCounter; // Track frame count separately
 
 		if (!TrySendAudioFrameToEncoder(frame, encoder, muxer, track))
 		{
@@ -465,7 +463,6 @@ int main(int argc, char* argv[])
 		// Step 5: Main pump loop
 		int64_t videoFrameCounter = 0;
 		int64_t audioPtsSamples = 0;
-		int64_t audioFrameCounter = 0;
 		int packetCount = 0;
 
 		while (true)
@@ -497,7 +494,7 @@ int main(int argc, char* argv[])
 				auto audioSendResult = audioDec.TrySend(flushPkt);
 				if (audioSendResult)
 				{
-					DrainAudioDecoder(audioDec, audioEnc, muxer, audioTrack, audioPtsSamples, audioFrameCounter);
+					DrainAudioDecoder(audioDec, audioEnc, muxer, audioTrack, audioPtsSamples);
 				}
 
 				// Flush encoders
@@ -552,11 +549,11 @@ int main(int argc, char* argv[])
 						break;
 
 					// NeedReceive: drain decoder
-					DrainAudioDecoder(audioDec, audioEnc, muxer, audioTrack, audioPtsSamples, audioFrameCounter);
+					DrainAudioDecoder(audioDec, audioEnc, muxer, audioTrack, audioPtsSamples);
 				}
 
 				// Drain decoder after sending
-				DrainAudioDecoder(audioDec, audioEnc, muxer, audioTrack, audioPtsSamples, audioFrameCounter);
+				DrainAudioDecoder(audioDec, audioEnc, muxer, audioTrack, audioPtsSamples);
 			}
 
 			if (packetCount % 100 == 0)
@@ -567,7 +564,6 @@ int main(int argc, char* argv[])
 
 		std::cout << "Transcode complete. Total packets: " << packetCount << "\n";
 		std::cout << "Video frames encoded: " << videoFrameCounter << "\n";
-		std::cout << "Audio frames encoded: " << audioFrameCounter << "\n";
 		std::cout << "Audio samples encoded (PTS units): " << audioPtsSamples << "\n";
 
 		// Step 6: Close muxer
