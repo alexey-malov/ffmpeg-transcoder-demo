@@ -15,7 +15,7 @@ namespace mm_pipeline
 
 /**
  * This class manages an asynchronous encoding pipeline with a worker thread.
- * 
+ *
  * Methods of this class except RequestStop() can only be called from the thread
  * that created the AsyncEncoder instance (the "main" thread).
  */
@@ -24,12 +24,28 @@ export class AsyncEncoder
 public:
 	using Frame = ffmpeg::Frame;
 	using Packet = ffmpeg::Packet;
+
 	struct CancelException : public std::exception
 	{
 		const char* what() const noexcept override
 		{
 			return "AsyncEncoder operation cancelled";
 		}
+	};
+
+	enum class TryPushResult
+	{
+		Ok,
+		Full,
+		Stopped,
+		Failed
+	};
+
+	enum class TryPopError
+	{
+		Empty,
+		Stopped,
+		Failed
 	};
 
 	AsyncEncoder(Encoder encoder, size_t inputCapacity, size_t outputCapacity)
@@ -140,6 +156,41 @@ public:
 		m_inputQueueHasFrames.notify_one();
 	}
 
+	TryPushResult TryPush(Frame&& frame)
+	{
+		if (!frame)
+			throw std::invalid_argument("Empty frame");
+
+		switch (m_state.load(std::memory_order::acquire))
+		{
+		case State::NotStarted:
+		case State::Finished:
+			throw std::logic_error("AsyncEncoder is not running");
+		case State::Stopped:
+			return TryPushResult::Stopped;
+		case State::Failed:
+			return TryPushResult::Failed;
+		}
+
+		if (m_inputClosed)
+		{
+			throw std::logic_error("Input is closed");
+		}
+
+		std::unique_lock lock{ m_inputQueueMutex };
+
+		if (m_inputQueue.size() >= m_inputCapacity)
+		{
+			return TryPushResult::Full;
+		}
+
+		m_inputQueue.push_back(std::move(frame));
+		lock.unlock();
+		m_inputQueueHasFrames.notify_one();
+
+		return TryPushResult::Ok;
+	}
+
 	// Signal that no more frames will be pushed.
 	// The worker will flush the encoder and finish after processing all queued frames.
 	void CloseInput()
@@ -185,6 +236,43 @@ public:
 		RethrowIfFailed();
 
 		throw std::logic_error("Unknown state");
+	}
+
+	std::expected<Packet, TryPopError> TryPop()
+	{
+		std::unique_lock lock{ m_outputQueueMutex };
+
+		if (!m_outputQueue.empty())
+		{
+			Packet pkt = std::move(m_outputQueue.front());
+			m_outputQueue.pop_front();
+			lock.unlock();
+			m_outputQueueHasFreeSpace.notify_one();
+			return pkt;
+		}
+
+		if (!m_outputClosed)
+		{
+			return std::unexpected(TryPopError::Empty);
+		}
+
+		lock.unlock();
+
+		auto state = m_state.load(std::memory_order::acquire);
+
+		switch (state)
+		{
+		case State::Finished:
+			return Packet{}; // EOF
+		case State::Stopped:
+			return std::unexpected(TryPopError::Stopped);
+		case State::Failed:
+			return std::unexpected(TryPopError::Failed);
+		default:
+			break;
+		}
+
+		throw std::logic_error("Invalid state");
 	}
 
 private:
@@ -241,7 +329,6 @@ private:
 		m_state.store(state, std::memory_order::release);
 		m_inputQueueHasFreeSpace.notify_one(); // Unblock any waiting producers
 		m_outputQueueHasPackets.notify_one(); // Unblock any waiting consumers
-
 	}
 
 	void EncodeFrame(const Frame& frame, const std::stop_token& stopToken)
