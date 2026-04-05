@@ -17,18 +17,19 @@ target_compile_definitions(mm_pipeline PRIVATE
 target_sources(mm_pipeline 
   PUBLIC
     FILE_SET cxx_modules TYPE CXX_MODULES FILES
+    "modules/async_decoder.ixx"
+    "modules/async_encoder.ixx"
     "modules/demuxer.ixx"
     "modules/error.ixx"
     "modules/muxer.ixx"
     "modules/decoder.ixx"
     "modules/encoder.ixx"
-    "modules/async_encoder.ixx"
   PRIVATE
     "src/demuxer.cpp"
     "src/muxer.cpp"
     "src/decoder.cpp"
     "src/encoder.cpp"
-  )
+   )
 
 target_include_directories(mm_pipeline
   PUBLIC
