@@ -22,12 +22,13 @@ target_sources(mm_pipeline
     "modules/muxer.ixx"
     "modules/decoder.ixx"
     "modules/encoder.ixx"
+    "modules/async_encoder.ixx"
   PRIVATE
     "src/demuxer.cpp"
     "src/muxer.cpp"
     "src/decoder.cpp"
     "src/encoder.cpp"
- )
+  )
 
 target_include_directories(mm_pipeline
   PUBLIC
