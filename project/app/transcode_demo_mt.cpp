@@ -105,7 +105,7 @@ bool TrySendFrameToEncoder(ffmpeg::Frame& frame, mm_pipeline::Encoder& encoder,
 	return true;
 }
 
-void DrainVideoEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_pipeline::Muxer::TrackId track)
+void DrainEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_pipeline::Muxer::TrackId track)
 {
 	auto encoderCtx = encoder.Context().get();
 
@@ -118,14 +118,10 @@ void DrainVideoEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer,
 			std::cerr << "Encoder TryReceive error: " << recvResult.error().code << "\n";
 			break;
 		}
-		if (*recvResult == ffmpeg::ReceiveResult::Produced)
+		else if (*recvResult == ffmpeg::ReceiveResult::Produced)
 		{
 			// Use encoder's pkt_timebase for correct timestamp rescaling
 			muxer.WritePacket(track, *pkt, encoderCtx->pkt_timebase);
-		}
-		else if (*recvResult == ffmpeg::ReceiveResult::EndOfStream)
-		{
-			break;
 		}
 		else
 		{
@@ -163,33 +159,7 @@ void DrainVideoDecoder(
 			return;
 		}
 
-		DrainVideoEncoder(encoder, muxer, track);
-	}
-}
-
-void DrainAudioEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_pipeline::Muxer::TrackId track)
-{
-	auto encoderCtx = encoder.Context().get();
-
-	// Drain encoder after sending frame
-	while (true)
-	{
-		ffmpeg::Packet pkt;
-		auto encRecvResult = encoder.TryReceive(pkt);
-		if (!encRecvResult)
-		{
-			std::cerr << "Encoder TryReceive error: " << encRecvResult.error().code << "\n";
-			break;
-		}
-		if (*encRecvResult == ffmpeg::ReceiveResult::Produced)
-		{
-			// Use encoder's pkt_timebase for correct timestamp rescaling
-			muxer.WritePacket(track, *pkt, encoderCtx->pkt_timebase);
-		}
-		else
-		{
-			break;
-		}
+		DrainEncoder(encoder, muxer, track);
 	}
 }
 
@@ -223,7 +193,7 @@ void DrainAudioDecoder(
 			return;
 		}
 
-		DrainAudioEncoder(encoder, muxer, track);
+		DrainEncoder(encoder, muxer, track);
 	}
 }
 
