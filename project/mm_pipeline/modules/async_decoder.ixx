@@ -33,6 +33,21 @@ public:
 		}
 	};
 
+	enum class TryPushResult
+	{
+		Ok,
+		Full,
+		Stopped,
+		Failed
+	};
+
+	enum class TryPopError
+	{
+		Empty,
+		Stopped,
+		Failed
+	};
+
 	AsyncDecoder(Decoder decoder, size_t inputCapacity, size_t outputCapacity)
 		: m_inputCapacity{ inputCapacity }
 		, m_outputCapacity{ outputCapacity }
@@ -144,6 +159,48 @@ public:
 		m_inputQueueHasPackets.notify_one();
 	}
 
+	TryPushResult TryPush(Packet&& pkt)
+	{
+		if (!pkt)
+		{
+			throw std::invalid_argument("Cannot push an empty packet. To close stream use CloseInput method");
+		}
+
+		if (m_inputClosed)
+		{
+			throw std::logic_error("Cannot push packets after input is closed");
+		}
+
+		switch (m_state.load(std::memory_order::acquire))
+		{
+		case State::NotStarted:
+		case State::Finished:
+			throw std::logic_error("Cannot push packets when AsyncDecoder is not running");
+
+		case State::Stopped:
+			return TryPushResult::Stopped;
+
+		case State::Failed:
+			return TryPushResult::Failed;
+
+		case State::Running:
+			break;
+		}
+
+		std::unique_lock lock{ m_inputQueueMutex };
+
+		if (m_inputQueue.size() >= m_inputCapacity)
+		{
+			return TryPushResult::Full;
+		}
+
+		m_inputQueue.push_back(std::move(pkt));
+		lock.unlock();
+		m_inputQueueHasPackets.notify_one();
+
+		return TryPushResult::Ok;
+	}
+
 	// Signal that no more packets will be pushed.
 	// The worker will flush the decoder and finish after processing all queued packets.
 	void CloseInput()
@@ -193,6 +250,45 @@ public:
 
 		RethrowIfFailed();
 		throw std::logic_error("Unknown state");
+	}
+
+	std::expected<Frame, TryPopError> TryPop()
+	{
+		std::unique_lock lock{ m_outputQueueMutex };
+
+		if (!m_outputQueue.empty())
+		{
+			Frame frame = std::move(m_outputQueue.front());
+			m_outputQueue.pop_front();
+			lock.unlock();
+			m_outputQueueHasFreeSpace.notify_one();
+			return frame;
+		}
+
+		if (!m_outputClosed)
+		{
+			return std::unexpected(TryPopError::Empty);
+		}
+
+		lock.unlock();
+
+		switch (m_state.load(std::memory_order::acquire))
+		{
+		case State::Finished:
+			return Frame{}; // EOF
+
+		case State::Stopped:
+			return std::unexpected(TryPopError::Stopped);
+
+		case State::Failed:
+			return std::unexpected(TryPopError::Failed);
+
+		case State::NotStarted:
+		case State::Running:
+			break;
+		}
+
+		throw std::logic_error("AsyncDecoder::TryPop : invalid state");
 	}
 
 private:
