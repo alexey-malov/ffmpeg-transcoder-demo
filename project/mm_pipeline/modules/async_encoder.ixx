@@ -9,6 +9,7 @@ import mm_pipeline.encoder;
 import ffmpeg.frame;
 import ffmpeg.packet;
 import ffmpeg.codec;
+import ffmpeg.rational;
 
 namespace mm_pipeline
 {
@@ -71,6 +72,11 @@ public:
 	{
 		RequestStop();
 		Join();
+	}
+
+	ffmpeg::Rational GetStreamTimeBase() const noexcept
+	{
+		return m_encoder.GetStreamTimeBase();
 	}
 
 	void Start()
@@ -156,6 +162,8 @@ public:
 		m_inputQueueHasFrames.notify_one();
 	}
 
+	// On Ok, the item is consumed.
+	// On Full, Stopped, or Failed, the item is not consumed and remains valid.
 	TryPushResult TryPush(Frame&& frame)
 	{
 		if (!frame)
