@@ -214,7 +214,7 @@ public:
 		std::unique_lock lock{ m_inputQueueMutex };
 		// It is ok to add an empty frame without acquiring free space,
 		// as it is a signal for the worker to flush and finish.
-		m_inputQueue.push_back(Frame{}); // Push an empty frame as a signal to flush and finish
+		m_inputQueue.push_back(Frame{ nullptr }); // Push an empty frame as a signal to flush and finish
 		m_inputClosed = true;
 		lock.unlock();
 		m_inputQueueHasFrames.notify_one();
@@ -239,7 +239,7 @@ public:
 			return pkt;
 		}
 		if (m_state.load(std::memory_order_acquire) == State::Finished)
-			return Packet{}; // EOF
+			return Packet{ nullptr }; // EOF
 
 		RethrowIfFailed();
 
@@ -271,7 +271,7 @@ public:
 		switch (state)
 		{
 		case State::Finished:
-			return Packet{}; // EOF
+			return Packet{ nullptr }; // EOF
 		case State::Stopped:
 			return std::unexpected(TryPopError::Stopped);
 		case State::Failed:
@@ -330,11 +330,13 @@ private:
 	void CloseOutput(State state)
 	{
 		{
-			std::unique_lock lk{ m_outputQueueMutex };
+			std::lock_guard lk{ m_outputQueueMutex };
+			// Publish m_outputClosed and m_state under the same mutex to ensure
+			// they are observed consistently by consumers.
 			m_outputClosed = true;
+			m_state.store(state, std::memory_order::release);
 		}
 
-		m_state.store(state, std::memory_order::release);
 		m_inputQueueHasFreeSpace.notify_one(); // Unblock any waiting producers
 		m_outputQueueHasPackets.notify_one(); // Unblock any waiting consumers
 	}
@@ -346,7 +348,8 @@ private:
 			auto sendResult = m_encoder.TrySend(frame);
 			if (!sendResult)
 			{
-				throw std::runtime_error(std::format("Encoder TrySend error: {}", sendResult.error().where));
+				throw std::runtime_error(std::format("Encoder TrySend error: {}, code: {}",
+					sendResult.error().where, sendResult.error().code));
 			}
 			if (*sendResult == SendResult::Accepted || *sendResult == SendResult::Flushed)
 				break;

@@ -217,7 +217,7 @@ public:
 		std::unique_lock lock{ m_inputQueueMutex };
 		// It is ok to add an empty packet without acquiring free space,
 		// as it is a signal for the worker to flush and finish.
-		m_inputQueue.push_back(Packet{});
+		m_inputQueue.push_back(Packet{ nullptr });
 		m_inputClosed = true;
 		lock.unlock();
 		m_inputQueueHasPackets.notify_one();
@@ -245,7 +245,7 @@ public:
 
 		if (m_state.load(std::memory_order_acquire) == State::Finished)
 		{
-			return Frame{}; // EOF
+			return Frame{ nullptr }; // EOF
 		}
 
 		RethrowIfFailed();
@@ -275,7 +275,7 @@ public:
 		switch (m_state.load(std::memory_order::acquire))
 		{
 		case State::Finished:
-			return Frame{}; // EOF
+			return Frame{ nullptr }; // EOF
 
 		case State::Stopped:
 			return std::unexpected(TryPopError::Stopped);
@@ -338,11 +338,13 @@ private:
 	void CloseOutput(State state)
 	{
 		{
-			std::unique_lock lk{ m_outputQueueMutex };
+			std::lock_guard lk{ m_outputQueueMutex };
+			// Publish m_outputClosed and m_state under the same mutex to ensure
+			// they are observed consistently by consumers.
 			m_outputClosed = true;
+			m_state.store(state, std::memory_order::release);
 		}
 
-		m_state.store(state, std::memory_order::release);
 		m_inputQueueHasFreeSpace.notify_one();
 		m_outputQueueHasFrames.notify_one();
 	}
