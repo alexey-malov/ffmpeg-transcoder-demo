@@ -23,6 +23,9 @@ import mm_pipeline.decoder;
 import mm_pipeline.encoder;
 import mm_pipeline.muxer;
 import mm_pipeline.error;
+import mm_pipeline.async_encoder;
+import mm_pipeline.async_decoder;
+import mm_pipeline.async_transcoder;
 import ffmpeg.dictionary;
 import ffmpeg.packet;
 import ffmpeg.frame;
@@ -68,143 +71,6 @@ StreamIndices FindStreams(const mm_pipeline::Demuxer& demuxer)
 		throw std::runtime_error("No audio stream found");
 
 	return indices;
-}
-
-bool TrySendFrameToEncoder(ffmpeg::Frame& frame, mm_pipeline::Encoder& encoder,
-	mm_pipeline::Muxer& muxer,
-	mm_pipeline::Muxer::TrackId track)
-{
-	auto encoderCtx = encoder.Context().get();
-
-	// Send frame to encoder
-	while (true)
-	{
-		auto sendResult = encoder.TrySend(frame);
-		if (!sendResult)
-		{
-			std::cerr << "Encoder TrySend error: " << sendResult.error().code << "\n";
-			return false;
-		}
-		if (*sendResult == ffmpeg::SendResult::Accepted || *sendResult == ffmpeg::SendResult::Flushed)
-			break;
-		// NeedReceive: drain encoder
-		ffmpeg::Packet pkt;
-		auto encRecvResult = encoder.TryReceive(pkt);
-		if (!encRecvResult)
-		{
-			std::cerr << "Encoder TryReceive error: " << encRecvResult.error().code << "\n";
-			return false;
-		}
-		if (*encRecvResult == ffmpeg::ReceiveResult::Produced)
-		{
-			// Use encoder's pkt_timebase for correct timestamp rescaling
-			muxer.WritePacket(track, *pkt, encoderCtx->pkt_timebase);
-		}
-		else if (*encRecvResult == ffmpeg::ReceiveResult::EndOfStream)
-		{
-			break;
-		}
-	}
-	return true;
-}
-
-void DrainEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_pipeline::Muxer::TrackId track)
-{
-	auto encoderCtx = encoder.Context().get();
-
-	while (true)
-	{
-		ffmpeg::Packet pkt;
-		auto recvResult = encoder.TryReceive(pkt);
-		if (!recvResult)
-		{
-			std::cerr << "Encoder TryReceive error: " << recvResult.error().code << "\n";
-			break;
-		}
-		else if (*recvResult == ffmpeg::ReceiveResult::Produced)
-		{
-			// Use encoder's pkt_timebase for correct timestamp rescaling
-			muxer.WritePacket(track, *pkt, encoderCtx->pkt_timebase);
-		}
-		else
-		{
-			break;
-		}
-	}
-}
-
-using FrameProcessor = std::function<void(ffmpeg::Frame&)>;
-
-// Helper to drain video decoder → encoder → muxer pipeline
-void DrainDecoder(
-	mm_pipeline::Decoder& decoder,
-	mm_pipeline::Encoder& encoder,
-	mm_pipeline::Muxer& muxer,
-	mm_pipeline::Muxer::TrackId track,
-	const FrameProcessor& processFrame)
-{
-	ffmpeg::Frame frame;
-	while (true)
-	{
-		auto recvResult = decoder.TryReceive(frame);
-		if (!recvResult)
-		{
-			std::cerr << "Decoder TryReceive error: " << recvResult.error().code << "\n";
-			break;
-		}
-		if (*recvResult == ffmpeg::ReceiveResult::EndOfStream)
-			break;
-		if (*recvResult == ffmpeg::ReceiveResult::NeedSend)
-			break;
-		processFrame(frame);
-
-		if (!TrySendFrameToEncoder(frame, encoder, muxer, track))
-		{
-			return;
-		}
-
-		DrainEncoder(encoder, muxer, track);
-	}
-}
-
-// Helper to flush encoder
-void FlushEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_pipeline::Muxer::TrackId track)
-{
-	ffmpeg::Frame emptyFrame{ nullptr };
-	auto sendResult = encoder.TrySend(emptyFrame);
-	if (!sendResult)
-	{
-		std::cerr << "Encoder flush TrySend error: " << sendResult.error().code << "\n";
-		return;
-	}
-
-	auto encoderCtx = encoder.Context().get();
-
-	// Drain encoder
-	while (true)
-	{
-		ffmpeg::Packet pkt;
-		auto recvResult = encoder.TryReceive(pkt);
-		if (!recvResult)
-		{
-			std::cerr << "Encoder flush TryReceive error: " << recvResult.error().code << "\n";
-			break;
-		}
-
-		if (*recvResult == ffmpeg::ReceiveResult::Produced)
-		{
-			// Use encoder's pkt_timebase for correct timestamp rescaling
-			muxer.WritePacket(track, *pkt, encoderCtx->pkt_timebase);
-		}
-		else if (*recvResult == ffmpeg::ReceiveResult::EndOfStream)
-		{
-			break;
-		}
-		else
-		{
-			break;
-		}
-	}
 }
 
 int main(int argc, char* argv[])
@@ -364,123 +230,29 @@ int main(int argc, char* argv[])
 
 		std::cout << "Muxer ready, starting transcode...\n";
 
-		// Step 5: Main pump loop
-		int64_t videoFrameCounter = 0;
-		int64_t audioPtsSamples = 0;
-		int packetCount = 0;
+		av_log_set_level(AV_LOG_ERROR);
 
-		FrameProcessor videoFrameProcessor = [&videoFrameCounter](ffmpeg::Frame& frame) {
-			frame->pts = videoFrameCounter++;
+		mm_pipeline::AsyncEncoder asyncAudioEncoder{ std::move(audioEnc), 20, 20 };
+		mm_pipeline::AsyncEncoder asyncVideoEncoder{ std::move(videoEnc), 20, 20 };
+		mm_pipeline::AsyncDecoder asyncAudioDecoder{ std::move(audioDec), 20, 20 };
+		mm_pipeline::AsyncDecoder asyncVideoDecoder{ std::move(videoDec), 20, 20 };
+
+		mm_pipeline::AsyncTranscoder asyncTranscoder{
+			muxer, demuxer,
+			{ asyncVideoDecoder, asyncVideoEncoder, indices.video, videoTrack },
+			{ asyncAudioDecoder, asyncAudioEncoder, indices.audio, audioTrack }
 		};
 
-		FrameProcessor audioFrameProcessor = [&audioPtsSamples](ffmpeg::Frame& frame) {
-			frame->pts = audioPtsSamples;
-			audioPtsSamples += frame->nb_samples;
-		};
+		using namespace std::chrono;
+		using Clock = high_resolution_clock;
 
-		av_log_set_level(AV_LOG_QUIET);
+		auto start = Clock::now();
 
-		while (true)
-		{
-			auto demuxResult = demuxer.TryRead();
-			if (!demuxResult)
-			{
-				std::cerr << "Demux error: " << demuxResult.error().code << "\n";
-				break;
-			}
+		asyncTranscoder.Run();
 
-			auto demuxOut = std::move(*demuxResult);
+		auto end = Clock::now();
 
-			if (std::holds_alternative<mm_pipeline::EndOfStream>(demuxOut))
-			{
-				std::cout << "End of stream, flushing...\n";
-
-				// Flush decoders and encoders
-				ffmpeg::Packet flushPkt{ nullptr };
-
-				// Flush video decoder
-				auto videoSendResult = videoDec.TrySend(flushPkt);
-				if (videoSendResult)
-				{
-					DrainDecoder(videoDec, videoEnc, muxer, videoTrack, videoFrameProcessor);
-				}
-
-				// Flush audio decoder
-				auto audioSendResult = audioDec.TrySend(flushPkt);
-				if (audioSendResult)
-				{
-					DrainDecoder(audioDec, audioEnc, muxer, audioTrack, audioFrameProcessor);
-				}
-
-				// Flush encoders
-				FlushEncoder(videoEnc, muxer, videoTrack);
-				FlushEncoder(audioEnc, muxer, audioTrack);
-
-				break;
-			}
-
-			// Extract mm_pipeline::Packet from variant
-			auto& demuxPacket = std::get<mm_pipeline::Packet>(demuxOut);
-			// Access the underlying ffmpeg::Packet
-			ffmpeg::Packet& pkt = demuxPacket.pkt;
-			const int streamIndex = pkt->stream_index;
-			++packetCount;
-
-			if (streamIndex == indices.video)
-			{
-
-				// Send packet to video decoder
-				while (true)
-				{
-					auto sendResult = videoDec.TrySend(pkt);
-					if (!sendResult)
-					{
-						std::cerr << "Video decoder TrySend error: " << sendResult.error().code << "\n";
-						break;
-					}
-
-					if (*sendResult == ffmpeg::SendResult::Accepted)
-						break;
-
-					// NeedReceive: drain decoder
-					DrainDecoder(videoDec, videoEnc, muxer, videoTrack, videoFrameProcessor);
-				}
-
-				// Drain decoder after sending
-				DrainDecoder(videoDec, videoEnc, muxer, videoTrack, videoFrameProcessor);
-			}
-			else if (streamIndex == indices.audio)
-			{
-				// Send packet to audio decoder
-				while (true)
-				{
-					auto sendResult = audioDec.TrySend(pkt);
-					if (!sendResult)
-					{
-						std::cerr << "Audio decoder TrySend error: " << sendResult.error().code << "\n";
-						break;
-					}
-
-					if (*sendResult == ffmpeg::SendResult::Accepted)
-						break;
-
-					// NeedReceive: drain decoder
-					DrainDecoder(audioDec, audioEnc, muxer, audioTrack, audioFrameProcessor);
-				}
-
-				// Drain decoder after sending
-				DrainDecoder(audioDec, audioEnc, muxer, audioTrack, audioFrameProcessor);
-			}
-
-			if (packetCount % 100 == 0)
-			{
-				std::cout << "Processed " << packetCount << " packets\n";
-			}
-		}
-
-		std::cout << "Transcode complete. Total packets: " << packetCount << "\n";
-		std::cout << "Video frames encoded: " << videoFrameCounter << "\n";
-		std::cout << "Audio samples encoded (PTS units): " << audioPtsSamples << "\n";
+		std::cout << "Finished in " << duration<double>(end - start).count() << " s.\n";
 
 		// Step 6: Close muxer
 		muxer.Close();
