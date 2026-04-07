@@ -380,6 +380,11 @@ int main(int argc, char* argv[])
 
 		av_log_set_level(AV_LOG_QUIET);
 
+		using namespace std::chrono;
+		using Clock = high_resolution_clock;
+
+		auto start = Clock::now();
+
 		while (true)
 		{
 			auto demuxResult = demuxer.TryRead();
@@ -471,12 +476,11 @@ int main(int argc, char* argv[])
 				// Drain decoder after sending
 				DrainDecoder(audioDec, audioEnc, muxer, audioTrack, audioFrameProcessor);
 			}
-
-			if (packetCount % 100 == 0)
-			{
-				std::cout << "Processed " << packetCount << " packets\n";
-			}
 		}
+
+		auto end = Clock::now();
+
+		std::cout << "Finished in " << duration<double>(end - start).count() << " s.\n";
 
 		std::cout << "Transcode complete. Total packets: " << packetCount << "\n";
 		std::cout << "Video frames encoded: " << videoFrameCounter << "\n";
