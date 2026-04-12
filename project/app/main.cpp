@@ -45,13 +45,12 @@ int main()
 			std::cerr << "Demuxing error: " << result.error().where << "\n";
 			break;
 		}
-		if (std::holds_alternative<mm_pipeline::EndOfStream>(*result))
+		auto& packet = *result;
+		if (!packet)
 		{
 			std::cout << "End of stream reached.\n";
 			break;
 		}
-		auto& packet = std::get<ffmpeg::Packet>(*result);
-
 		auto& srcStreamInfo = srcStreams[packet->stream_index];
 
 		muxer.WritePacket(srcStreamInfo.trackId, *packet, demuxer.GetStreamInfo(packet->stream_index).timeBase.ToAV());

@@ -14,12 +14,6 @@ import mm_pipeline.error;
 namespace mm_pipeline
 {
 
-export struct EndOfStream
-{
-};
-
-export using DemuxOutput = std::variant<EndOfStream, ffmpeg::Packet>;
-
 export struct StreamInfo
 {
 	int index = -1;
@@ -42,7 +36,8 @@ public:
 
 	~Demuxer();
 
-	[[nodiscard]] std::expected<DemuxOutput, Error> TryRead();
+	// Returns Null packet on EOF
+	[[nodiscard]] std::expected<ffmpeg::Packet, Error> TryRead();
 
 	[[nodiscard]] unsigned int GetStreamCount() const noexcept { return m_ctx->nb_streams; }
 

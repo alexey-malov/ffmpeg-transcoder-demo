@@ -395,10 +395,9 @@ int main(int argc, char* argv[])
 				std::cerr << "Demux error: " << demuxResult.error().code << "\n";
 				break;
 			}
+			auto& pkt = *demuxResult;
 
-			auto demuxOut = std::move(*demuxResult);
-
-			if (std::holds_alternative<mm_pipeline::EndOfStream>(demuxOut))
+			if (!pkt)
 			{
 				std::cout << "End of stream, flushing...\n";
 
@@ -426,7 +425,6 @@ int main(int argc, char* argv[])
 				break;
 			}
 
-			auto& pkt = std::get<Packet>(demuxOut);
 			const int streamIndex = pkt->stream_index;
 			++packetCount;
 

@@ -316,7 +316,9 @@ private:
 			throw Exception{ readResult.error() };
 		}
 
-		if (std::holds_alternative<EndOfStream>(*readResult))
+		auto& packet = *readResult;
+
+		if (!packet)
 		{
 			m_demuxEof = true;
 
@@ -334,7 +336,6 @@ private:
 			return true;
 		}
 
-		auto packet = std::move(std::get<Packet>(*readResult));
 		const int streamIndex = packet->stream_index;
 
 		Branch* branch = nullptr;

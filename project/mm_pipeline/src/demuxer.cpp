@@ -31,7 +31,7 @@ Demuxer::Demuxer(Demuxer&&) noexcept = default;
 Demuxer& Demuxer::operator=(Demuxer&&) noexcept = default;
 Demuxer::~Demuxer() = default;
 
-std::expected<DemuxOutput, Error> Demuxer::TryRead()
+std::expected<ffmpeg::Packet, Error> Demuxer::TryRead()
 {
 	ffmpeg::Packet packet;
 
@@ -40,7 +40,7 @@ std::expected<DemuxOutput, Error> Demuxer::TryRead()
 		const auto err = r.error();
 		if (err.code == AVERROR_EOF)
 		{
-			return DemuxOutput{ EndOfStream{} };
+			return ffmpeg::Packet::Null();
 		}
 		return std::unexpected(
 			MakeError(ErrDomain::Demux, err.code, "mm_pipeline::Demuxer::TryRead : av_read_frame failed"));
