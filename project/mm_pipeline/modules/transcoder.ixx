@@ -122,11 +122,9 @@ private:
 		bool encoderInputClosed = false;
 		bool encoderEof = false;
 
-		ffmpeg::Packet pendingPacket;
-		bool hasPendingPacket = false;
+		std::optional<Packet> pendingPacket;
 
-		Frame pendingFrame;
-		bool hasPendingFrame = false;
+		std::optional<Frame> pendingFrame;
 	};
 
 	bool AllDone() const noexcept
@@ -176,14 +174,13 @@ private:
 		bool progress = false;
 
 		// 1. Сначала пытаемся протолкнуть ранее не принятый encoder-ом frame.
-		if (branch.hasPendingFrame)
+		if (branch.pendingFrame)
 		{
-			auto pushResult = branch.encoder.TryPush(std::move(branch.pendingFrame));
+			auto pushResult = branch.encoder.TryPush(std::move(*branch.pendingFrame));
 			switch (pushResult)
 			{
 			case AsyncEncoder::TryPushResult::Ok:
-				branch.pendingFrame = Frame::Null();
-				branch.hasPendingFrame = false;
+				branch.pendingFrame.reset();
 				progress = true;
 				break;
 
@@ -245,7 +242,6 @@ private:
 
 			case AsyncEncoder::TryPushResult::Full:
 				branch.pendingFrame = std::move(frame);
-				branch.hasPendingFrame = true;
 				return true;
 
 			case AsyncEncoder::TryPushResult::Stopped:
@@ -258,6 +254,31 @@ private:
 		}
 	}
 
+	static std::optional<bool> TryFlushPendingPacket(Branch& branch)
+	{
+		if (branch.pendingPacket)
+		{
+			auto pushResult = branch.decoder.TryPush(std::move(*branch.pendingPacket));
+			switch (pushResult)
+			{
+			case AsyncDecoder::TryPushResult::Ok:
+				branch.pendingPacket.reset();
+				return true;
+
+			case AsyncDecoder::TryPushResult::Full:
+				return false;
+
+			case AsyncDecoder::TryPushResult::Stopped:
+				throw AsyncDecoder::CancelException{};
+
+			case AsyncDecoder::TryPushResult::Failed:
+				branch.decoder.RethrowIfFailed();
+				throw std::logic_error("AsyncDecoder::TryPush returned Failed but no exception was stored");
+			}
+		}
+		return std::nullopt;
+	}
+
 	bool FeedDemux()
 	{
 		if (m_demuxEof)
@@ -266,48 +287,13 @@ private:
 		}
 
 		// Сначала пытаемся протолкнуть уже прочитанный, но не принятый decoder-ом packet.
-		if (m_video.hasPendingPacket)
+		if (auto flushResult = TryFlushPendingPacket(m_video))
 		{
-			auto pushResult = m_video.decoder.TryPush(std::move(m_video.pendingPacket));
-			switch (pushResult)
-			{
-			case AsyncDecoder::TryPushResult::Ok:
-				m_video.pendingPacket = {};
-				m_video.hasPendingPacket = false;
-				return true;
-
-			case AsyncDecoder::TryPushResult::Full:
-				return false;
-
-			case AsyncDecoder::TryPushResult::Stopped:
-				throw AsyncDecoder::CancelException{};
-
-			case AsyncDecoder::TryPushResult::Failed:
-				m_video.decoder.RethrowIfFailed();
-				throw std::logic_error("AsyncDecoder::TryPush returned Failed but no exception was stored");
-			}
+			return *flushResult;
 		}
-
-		if (m_audio.hasPendingPacket)
+		if (auto flushResult = TryFlushPendingPacket(m_audio))
 		{
-			auto pushResult = m_audio.decoder.TryPush(std::move(m_audio.pendingPacket));
-			switch (pushResult)
-			{
-			case AsyncDecoder::TryPushResult::Ok:
-				m_audio.pendingPacket = {};
-				m_audio.hasPendingPacket = false;
-				return true;
-
-			case AsyncDecoder::TryPushResult::Full:
-				return false;
-
-			case AsyncDecoder::TryPushResult::Stopped:
-				throw AsyncDecoder::CancelException{};
-
-			case AsyncDecoder::TryPushResult::Failed:
-				m_audio.decoder.RethrowIfFailed();
-				throw std::logic_error("AsyncDecoder::TryPush returned Failed but no exception was stored");
-			}
+			return *flushResult;
 		}
 
 		auto readResult = m_demuxer.TryRead();
@@ -321,18 +307,7 @@ private:
 		if (!packet)
 		{
 			m_demuxEof = true;
-
-			if (!m_video.decoderInputClosed)
-			{
-				m_video.decoder.CloseInput();
-				m_video.decoderInputClosed = true;
-			}
-			if (!m_audio.decoderInputClosed)
-			{
-				m_audio.decoder.CloseInput();
-				m_audio.decoderInputClosed = true;
-			}
-
+			CloseDecoders();
 			return true;
 		}
 
@@ -360,7 +335,6 @@ private:
 
 		case AsyncDecoder::TryPushResult::Full:
 			branch->pendingPacket = std::move(packet);
-			branch->hasPendingPacket = true;
 			return true;
 
 		case AsyncDecoder::TryPushResult::Stopped:
@@ -372,6 +346,20 @@ private:
 		}
 
 		throw std::logic_error("AsyncDecoder::TryPush returned invalid result");
+	}
+
+	void CloseDecoders()
+	{
+		if (!m_video.decoderInputClosed)
+		{
+			m_video.decoder.CloseInput();
+			m_video.decoderInputClosed = true;
+		}
+		if (!m_audio.decoderInputClosed)
+		{
+			m_audio.decoder.CloseInput();
+			m_audio.decoderInputClosed = true;
+		}
 	}
 
 	Muxer& m_muxer;
