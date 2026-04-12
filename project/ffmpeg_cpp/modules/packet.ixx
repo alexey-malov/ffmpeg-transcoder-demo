@@ -15,10 +15,7 @@ export class Packet
 public:
 	Packet();
 
-	explicit Packet(std::nullptr_t) noexcept
-		: m_packet{ nullptr }
-	{
-	}
+	static Packet Null() noexcept { return Packet{ nullptr }; }
 
 	Packet(const Packet&) = delete;
 	Packet& operator=(const Packet&) = delete;
@@ -54,6 +51,11 @@ public:
 	}
 
 private:
+	explicit Packet(std::nullptr_t) noexcept
+		: m_packet{ nullptr }
+	{
+	}
+
 	struct Deleter
 	{
 		void operator()(AVPacket* packet) const noexcept

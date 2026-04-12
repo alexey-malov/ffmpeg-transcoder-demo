@@ -214,7 +214,7 @@ public:
 		std::unique_lock lock{ m_inputQueueMutex };
 		// It is ok to add an empty frame without acquiring free space,
 		// as it is a signal for the worker to flush and finish.
-		m_inputQueue.push_back(Frame{ nullptr }); // Push an empty frame as a signal to flush and finish
+		m_inputQueue.push_back(Frame::Null()); // Push null frame as a signal to flush and finish
 		m_inputClosed = true;
 		lock.unlock();
 		m_inputQueueHasFrames.notify_one();
@@ -239,7 +239,7 @@ public:
 			return pkt;
 		}
 		if (m_state.load(std::memory_order_acquire) == State::Finished)
-			return Packet{ nullptr }; // EOF
+			return Packet::Null(); // EOF
 
 		RethrowIfFailed();
 
@@ -271,7 +271,7 @@ public:
 		switch (state)
 		{
 		case State::Finished:
-			return Packet{ nullptr }; // EOF
+			return Packet::Null(); // EOF
 		case State::Stopped:
 			return std::unexpected(TryPopError::Stopped);
 		case State::Failed:

@@ -217,7 +217,7 @@ public:
 		std::unique_lock lock{ m_inputQueueMutex };
 		// It is ok to add an empty packet without acquiring free space,
 		// as it is a signal for the worker to flush and finish.
-		m_inputQueue.push_back(Packet{ nullptr });
+		m_inputQueue.push_back(Packet::Null());
 		m_inputClosed = true;
 		lock.unlock();
 		m_inputQueueHasPackets.notify_one();
@@ -245,7 +245,7 @@ public:
 
 		if (m_state.load(std::memory_order_acquire) == State::Finished)
 		{
-			return Frame{ nullptr }; // EOF
+			return Frame::Null(); // EOF
 		}
 
 		RethrowIfFailed();
@@ -275,7 +275,7 @@ public:
 		switch (m_state.load(std::memory_order::acquire))
 		{
 		case State::Finished:
-			return Frame{ nullptr }; // EOF
+			return Frame::Null(); // EOF
 
 		case State::Stopped:
 			return std::unexpected(TryPopError::Stopped);

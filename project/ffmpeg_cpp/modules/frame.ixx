@@ -16,15 +16,9 @@ export class Frame
 public:
 	Frame();
 
-	explicit Frame(std::nullptr_t) noexcept
-		: m_frame{ nullptr }
-	{
-	}
-
-	explicit Frame(AVFrame* frame) noexcept
-		: m_frame{ frame }
-	{
-	}
+	static Frame Null() noexcept {
+		return Frame{ nullptr };
+	};
 
 	[[nodiscard]] Frame Clone() const
 	{
@@ -58,7 +52,6 @@ public:
 		return {};
 	}
 
-
 	template <typename Self>
 	[[nodiscard]] auto get(this Self& self) noexcept
 		-> std::conditional_t<std::is_const_v<Self>, const AVFrame*, AVFrame*>
@@ -81,6 +74,16 @@ public:
 	}
 
 private:
+	explicit Frame(std::nullptr_t) noexcept
+		: m_frame{ nullptr }
+	{
+	}
+
+	explicit Frame(AVFrame* frame) noexcept
+		: m_frame{ frame }
+	{
+	}
+
 	struct Deleter
 	{
 		void operator()(AVFrame* frame) const noexcept

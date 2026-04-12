@@ -170,8 +170,7 @@ void DrainDecoder(
 // Helper to flush encoder
 void FlushEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_pipeline::Muxer::TrackId track)
 {
-	ffmpeg::Frame emptyFrame{ nullptr };
-	auto sendResult = encoder.TrySend(emptyFrame);
+	auto sendResult = encoder.TrySend(ffmpeg::Frame::Null());
 	if (!sendResult)
 	{
 		std::cerr << "Encoder flush TrySend error: " << sendResult.error().code << "\n";
@@ -401,7 +400,7 @@ int main(int argc, char* argv[])
 				std::cout << "End of stream, flushing...\n";
 
 				// Flush decoders and encoders
-				ffmpeg::Packet flushPkt{ nullptr };
+				auto flushPkt = ffmpeg::Packet::Null();
 
 				// Flush video decoder
 				auto videoSendResult = videoDec.TrySend(flushPkt);

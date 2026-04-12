@@ -181,7 +181,7 @@ private:
 			switch (pushResult)
 			{
 			case AsyncEncoder::TryPushResult::Ok:
-				branch.pendingFrame = Frame{ nullptr };
+				branch.pendingFrame = Frame::Null();
 				branch.hasPendingFrame = false;
 				progress = true;
 				break;
