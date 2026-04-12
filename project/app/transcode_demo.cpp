@@ -37,6 +37,9 @@ extern "C" {
 #include <libavutil/log.h>
 }
 
+using ffmpeg::Packet;
+using ffmpeg::Frame;
+
 // Helper to find stream indices
 struct StreamIndices
 {
@@ -70,7 +73,7 @@ StreamIndices FindStreams(const mm_pipeline::Demuxer& demuxer)
 	return indices;
 }
 
-bool TrySendFrameToEncoder(ffmpeg::Frame& frame, mm_pipeline::Encoder& encoder,
+bool TrySendFrameToEncoder(Frame& frame, mm_pipeline::Encoder& encoder,
 	mm_pipeline::Muxer& muxer,
 	mm_pipeline::Muxer::TrackId track)
 {
@@ -88,7 +91,7 @@ bool TrySendFrameToEncoder(ffmpeg::Frame& frame, mm_pipeline::Encoder& encoder,
 		if (*sendResult == ffmpeg::SendResult::Accepted || *sendResult == ffmpeg::SendResult::Flushed)
 			break;
 		// NeedReceive: drain encoder
-		ffmpeg::Packet pkt;
+		Packet pkt;
 		auto encRecvResult = encoder.TryReceive(pkt);
 		if (!encRecvResult)
 		{
@@ -114,7 +117,7 @@ void DrainEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_p
 
 	while (true)
 	{
-		ffmpeg::Packet pkt;
+		Packet pkt;
 		auto recvResult = encoder.TryReceive(pkt);
 		if (!recvResult)
 		{
@@ -133,7 +136,7 @@ void DrainEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_p
 	}
 }
 
-using FrameProcessor = std::function<void(ffmpeg::Frame&)>;
+using FrameProcessor = std::function<void(Frame&)>;
 
 // Helper to drain video decoder → encoder → muxer pipeline
 void DrainDecoder(
@@ -143,7 +146,7 @@ void DrainDecoder(
 	mm_pipeline::Muxer::TrackId track,
 	const FrameProcessor& processFrame)
 {
-	ffmpeg::Frame frame;
+	Frame frame;
 	while (true)
 	{
 		auto recvResult = decoder.TryReceive(frame);
@@ -170,7 +173,7 @@ void DrainDecoder(
 // Helper to flush encoder
 void FlushEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_pipeline::Muxer::TrackId track)
 {
-	auto sendResult = encoder.TrySend(ffmpeg::Frame::Null());
+	auto sendResult = encoder.TrySend(Frame::Null());
 	if (!sendResult)
 	{
 		std::cerr << "Encoder flush TrySend error: " << sendResult.error().code << "\n";
@@ -182,7 +185,7 @@ void FlushEncoder(mm_pipeline::Encoder& encoder, mm_pipeline::Muxer& muxer, mm_p
 	// Drain encoder
 	while (true)
 	{
-		ffmpeg::Packet pkt;
+		Packet pkt;
 		auto recvResult = encoder.TryReceive(pkt);
 		if (!recvResult)
 		{
@@ -368,11 +371,11 @@ int main(int argc, char* argv[])
 		int64_t audioPtsSamples = 0;
 		int packetCount = 0;
 
-		FrameProcessor videoFrameProcessor = [&videoFrameCounter](ffmpeg::Frame& frame) {
+		FrameProcessor videoFrameProcessor = [&videoFrameCounter](Frame& frame) {
 			frame->pts = videoFrameCounter++;
 		};
 
-		FrameProcessor audioFrameProcessor = [&audioPtsSamples](ffmpeg::Frame& frame) {
+		FrameProcessor audioFrameProcessor = [&audioPtsSamples](Frame& frame) {
 			frame->pts = audioPtsSamples;
 			audioPtsSamples += frame->nb_samples;
 		};
@@ -400,7 +403,7 @@ int main(int argc, char* argv[])
 				std::cout << "End of stream, flushing...\n";
 
 				// Flush decoders and encoders
-				auto flushPkt = ffmpeg::Packet::Null();
+				auto flushPkt = Packet::Null();
 
 				// Flush video decoder
 				auto videoSendResult = videoDec.TrySend(flushPkt);
@@ -423,10 +426,7 @@ int main(int argc, char* argv[])
 				break;
 			}
 
-			// Extract mm_pipeline::Packet from variant
-			auto& demuxPacket = std::get<mm_pipeline::Packet>(demuxOut);
-			// Access the underlying ffmpeg::Packet
-			ffmpeg::Packet& pkt = demuxPacket.pkt;
+			auto& pkt = std::get<Packet>(demuxOut);
 			const int streamIndex = pkt->stream_index;
 			++packetCount;
 

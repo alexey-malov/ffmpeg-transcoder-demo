@@ -19,6 +19,7 @@ export class AsyncTranscoder
 {
 public:
 	using Frame = ffmpeg::Frame;
+	using Packet = ffmpeg::Packet;
 	using FrameProcessor = std::function<void(Frame& frame)>;
 
 	struct BranchConfig
@@ -333,8 +334,8 @@ private:
 			return true;
 		}
 
-		auto demuxPacket = std::move(std::get<Packet>(*readResult));
-		const int streamIndex = demuxPacket.pkt->stream_index;
+		auto packet = std::move(std::get<Packet>(*readResult));
+		const int streamIndex = packet->stream_index;
 
 		Branch* branch = nullptr;
 		if (streamIndex == m_video.streamIndex)
@@ -350,14 +351,14 @@ private:
 			return true;
 		}
 
-		auto pushResult = branch->decoder.TryPush(std::move(demuxPacket.pkt));
+		auto pushResult = branch->decoder.TryPush(std::move(packet));
 		switch (pushResult)
 		{
 		case AsyncDecoder::TryPushResult::Ok:
 			return true;
 
 		case AsyncDecoder::TryPushResult::Full:
-			branch->pendingPacket = std::move(demuxPacket.pkt);
+			branch->pendingPacket = std::move(packet);
 			branch->hasPendingPacket = true;
 			return true;
 

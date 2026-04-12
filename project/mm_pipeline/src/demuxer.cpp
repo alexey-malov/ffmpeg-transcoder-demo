@@ -35,7 +35,8 @@ std::expected<DemuxOutput, Error> Demuxer::TryRead()
 {
 	ffmpeg::Packet packet;
 
-	if (auto r = m_ctx.TryReadFrame(*packet); !r) [[unlikely]] {
+	if (auto r = m_ctx.TryReadFrame(*packet); !r) [[unlikely]]
+	{
 		const auto err = r.error();
 		if (err.code == AVERROR_EOF)
 		{
@@ -52,14 +53,7 @@ std::expected<DemuxOutput, Error> Demuxer::TryRead()
 			"mm_pipeline::Demuxer::TryRead : invalid stream index in packet"));
 	}
 
-	const auto& stream = *m_ctx->streams[packet->stream_index];
-
-	return DemuxOutput{
-		Packet{
-			.pkt = std::move(packet),
-			.timeBase = ffmpeg::Rational{ stream.time_base },
-		},
-	};
+	return std::move(packet);
 }
 
 } // namespace mm_pipeline

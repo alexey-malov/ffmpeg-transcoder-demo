@@ -3,6 +3,7 @@ import mm_pipeline.demuxer;
 import mm_pipeline.muxer;
 import mm_pipeline.decoder;
 import ffmpeg.codec;
+import ffmpeg.packet;
 
 int main()
 {
@@ -49,11 +50,11 @@ int main()
 			std::cout << "End of stream reached.\n";
 			break;
 		}
-		auto& packet = std::get<mm_pipeline::Packet>(*result);
+		auto& packet = std::get<ffmpeg::Packet>(*result);
 
-		auto& srcStreamInfo = srcStreams[packet.pkt->stream_index];
+		auto& srcStreamInfo = srcStreams[packet->stream_index];
 
-		muxer.WritePacket(srcStreamInfo.trackId, *packet.pkt, packet.timeBase.ToAV());
+		muxer.WritePacket(srcStreamInfo.trackId, *packet, demuxer.GetStreamInfo(packet->stream_index).timeBase.ToAV());
 	}
 
 	muxer.Close();

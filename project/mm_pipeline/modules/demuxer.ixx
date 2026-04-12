@@ -8,6 +8,7 @@ export module mm_pipeline.demuxer;
 import ffmpeg.input_format_context;
 import ffmpeg.packet;
 import ffmpeg.rational;
+import std;
 import mm_pipeline.error;
 
 namespace mm_pipeline
@@ -17,13 +18,7 @@ export struct EndOfStream
 {
 };
 
-export struct Packet
-{
-	ffmpeg::Packet pkt;
-	ffmpeg::Rational timeBase;
-};
-
-export using DemuxOutput = std::variant<EndOfStream, Packet>;
+export using DemuxOutput = std::variant<EndOfStream, ffmpeg::Packet>;
 
 export struct StreamInfo
 {
@@ -58,14 +53,14 @@ public:
 			throw Exception{ MakeError(ErrDomain::Demux, ErrorUnknown, "mm_pipeline::Demuxer::GetStreamInfo : invalid stream index") };
 		}
 		const auto& stream = *m_ctx->streams[index];
-		
+
 		// Use avg_frame_rate if valid, otherwise fallback to r_frame_rate
 		ffmpeg::Rational frameRate{ stream.avg_frame_rate };
 		if (frameRate.Num() <= 0 || frameRate.Den() <= 0)
 		{
 			frameRate = ffmpeg::Rational{ stream.r_frame_rate };
 		}
-		
+
 		return StreamInfo{
 			.index = static_cast<int>(index),
 			.type = stream.codecpar->codec_type,
