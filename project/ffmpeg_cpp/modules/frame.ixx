@@ -5,7 +5,6 @@ module;
 
 export module ffmpeg.frame;
 import std;
-import ffmpeg.unique_handle;
 import ffmpeg.error;
 
 namespace ffmpeg
@@ -16,7 +15,8 @@ export class Frame
 public:
 	Frame();
 
-	static Frame Null() noexcept {
+	[[nodiscard]] static Frame Null() noexcept
+	{
 		return Frame{ nullptr };
 	};
 
@@ -91,9 +91,8 @@ private:
 			av_frame_free(&frame);
 		}
 	};
-	using FramePtr = UniqueHandle<AVFrame, Deleter>;
 
-	FramePtr m_frame;
+	std::unique_ptr<AVFrame, Deleter> m_frame;
 };
 
 } // namespace ffmpeg

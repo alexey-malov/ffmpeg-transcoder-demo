@@ -3,7 +3,6 @@ module;
 #include <cassert>
 
 export module ffmpeg.codec;
-import ffmpeg.unique_handle;
 import ffmpeg.error;
 import std;
 
@@ -67,7 +66,6 @@ private:
 			avcodec_free_context(&ctx);
 		}
 	};
-	using CodecContextPtr = UniqueHandle<AVCodecContext, Deleter>;
 
 	template <typename Self>
 	[[nodiscard]] decltype(auto) ctx(this Self& self) noexcept
@@ -77,7 +75,7 @@ private:
 		return c;
 	}
 
-	CodecContextPtr m_ctx{ nullptr };
+	std::unique_ptr<AVCodecContext, Deleter> m_ctx{ nullptr };
 };
 
 } // namespace ffmpeg

@@ -8,7 +8,6 @@ export module ffmpeg.output_format_context;
 import std;
 import ffmpeg.packet;
 import ffmpeg.error;
-import ffmpeg.unique_handle;
 
 namespace ffmpeg
 {
@@ -89,7 +88,7 @@ private:
 	{
 		void operator()(AVFormatContext* ctx) noexcept;
 	};
-	using FormatContextPtr = UniqueHandle<AVFormatContext, Deleter>;
+	using FormatContextPtr = std::unique_ptr<AVFormatContext, Deleter>;
 
 	struct State
 	{

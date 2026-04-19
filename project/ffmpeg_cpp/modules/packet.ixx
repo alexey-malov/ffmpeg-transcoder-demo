@@ -5,7 +5,6 @@ module;
 
 export module ffmpeg.packet;
 import std;
-import ffmpeg.unique_handle;
 
 namespace ffmpeg
 {
@@ -17,14 +16,7 @@ public:
 
 	static Packet Null() noexcept { return Packet{ nullptr }; }
 
-	Packet(const Packet&) = delete;
-	Packet& operator=(const Packet&) = delete;
-
-	Packet(Packet&& other) noexcept = default;
-
-	Packet& operator=(Packet&& other) noexcept = default;
-
-	[[nodiscard]] operator bool() const noexcept
+	[[nodiscard]] explicit operator bool() const noexcept
 	{
 		return m_packet.get() != nullptr;
 	}
@@ -63,8 +55,11 @@ private:
 			av_packet_free(&packet);
 		}
 	};
-	using PacketPtr = UniqueHandle<AVPacket, Deleter>;
-	PacketPtr m_packet;
+
+	std::unique_ptr<AVPacket, Deleter> m_packet;
 };
+
+static_assert(std::movable<Packet>);
+static_assert(!std::copyable<Packet>);
 
 } // namespace ffmpeg

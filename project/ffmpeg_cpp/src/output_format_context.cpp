@@ -93,7 +93,8 @@ std::expected<void, Error> OutputFormatContext::TryWriteHeader(AVDictionary** op
 	if (m_state.headerWritten)
 		return {};
 
-	if (auto e = TryOpenFileIO(); !e) return std::unexpected(e.error());
+	if (auto e = TryOpenFileIO(); !e)
+		return std::unexpected(e.error());
 
 	if (const int ret = avformat_write_header(m_ctx.get(), options); ret < 0) [[unlikely]]
 	{

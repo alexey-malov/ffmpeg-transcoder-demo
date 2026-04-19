@@ -4,7 +4,7 @@ add_catch_tests(ffmpeg_cpp_tests My::ffmpeg_cpp)
 
 target_sources(ffmpeg_cpp_tests PRIVATE
   rational_tests.cpp
-  unique_handle_tests.cpp
+  
   dictionary_tests.cpp)
 
 include(${CMAKE_CURRENT_LIST_DIR}/../cmake/FfmpegTestRuntime.cmake)

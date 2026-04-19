@@ -3,7 +3,6 @@ module;
 #include "../src/codec_par.hpp"
 
 export module ffmpeg.codec_parameters;
-import ffmpeg.unique_handle;
 import ffmpeg.error;
 import std;
 
@@ -84,7 +83,7 @@ private:
 			avcodec_parameters_free(&params);
 		}
 	};
-	UniqueHandle<AVCodecParameters, Deleter> m_params;
+	std::unique_ptr <AVCodecParameters, Deleter> m_params;
 };
 
 } // namespace ffmpeg

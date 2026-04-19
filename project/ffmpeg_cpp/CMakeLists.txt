@@ -28,7 +28,7 @@ target_sources(ffmpeg_cpp
       "modules/rational.ixx"
       "modules/rational.io.ixx"
       "modules/version.ixx"
-      "modules/unique_handle.ixx"
+      
   PRIVATE
     "src/avcodec.hpp"
     "src/avformat.hpp"
