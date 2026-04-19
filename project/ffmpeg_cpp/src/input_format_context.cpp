@@ -24,17 +24,12 @@ InputFormatContext::InputFormatContext(const char* url, const AVInputFormat* inp
 
 std::expected<void, Error> InputFormatContext::TryFindStreamInfo(AVDictionary** options) noexcept
 {
-	auto e = ErrorFromFFmpegErrorCode(avformat_find_stream_info(m_ctx.get(), options), "avformat_find_stream_info");
-	if (e) return std::unexpected(e);
-	return {};
+	return ExpectedFromFFmpegErrorCode(avformat_find_stream_info(m_ctx.get(), options), "avformat_find_stream_info");
 }
 
 std::expected<void, Error> InputFormatContext::TryReadFrame(AVPacket& packet) noexcept
 {
-	if (const int code = av_read_frame(m_ctx.get(), &packet); code < 0) [[unlikely]] {
-		return std::unexpected(MakeFFmpegError(code, "av_read_frame"));
-	}
-	return {};
+	return ExpectedFromFFmpegErrorCode(av_read_frame(m_ctx.get(), &packet), "av_read_frame");
 }
 
 } // namespace ffmpeg

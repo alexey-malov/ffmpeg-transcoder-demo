@@ -55,23 +55,17 @@ CodecContext::CodecContext(const AVCodec* codec)
 
 std::expected<void, Error> CodecContext::TryOpen(const AVCodec* codec, AVDictionary** options) noexcept
 {
-	auto e = ErrorFromFFmpegErrorCode(avcodec_open2(ctx(), codec, options), "avcodec_open2");
-	if (e) return std::unexpected(e);
-	return {};
+	return ExpectedFromFFmpegErrorCode(avcodec_open2(ctx(), codec, options), "avcodec_open2");
 }
 
 std::expected<void, Error> CodecContext::TryFromCodecParameters(const AVCodecParameters& par) noexcept
 {
-	auto e = ErrorFromFFmpegErrorCode(avcodec_parameters_to_context(ctx(), &par), "avcodec_parameters_to_context");
-	if (e) return std::unexpected(e);
-	return {};
+	return ExpectedFromFFmpegErrorCode(avcodec_parameters_to_context(ctx(), &par), "avcodec_parameters_to_context");
 }
 
 std::expected<void, Error> CodecContext::TryToCodecParameters(AVCodecParameters& par) const noexcept
 {
-	auto e = ErrorFromFFmpegErrorCode(avcodec_parameters_from_context(&par, ctx()), "avcodec_parameters_from_context");
-	if (e) return std::unexpected(e);
-	return {};
+	return ExpectedFromFFmpegErrorCode(avcodec_parameters_from_context(&par, ctx()), "avcodec_parameters_from_context");
 }
 
 std::expected<SendResult, Error> CodecContext::TrySendPacket(const AVPacket* pkt) noexcept

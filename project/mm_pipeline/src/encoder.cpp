@@ -1,7 +1,7 @@
 module;
 
-#include "../../ffmpeg_cpp/src/error.hpp"
 #include "../../ffmpeg_cpp/src/avcodec.hpp"
+#include "../../ffmpeg_cpp/src/error.hpp"
 #include <cassert>
 
 module mm_pipeline.encoder;
@@ -29,13 +29,13 @@ Encoder::Encoder(const AVCodec* codec, ffmpeg::Rational streamTimeBase)
 std::expected<void, Error> Encoder::TryOpen(AVDictionary** options) noexcept
 {
 	assert(!m_opened && "Encoder::TryOpen called on already opened encoder");
-	
+
 	auto r = m_ctx.TryOpen(m_codec, options);
 	if (!r) [[unlikely]]
 	{
 		return std::unexpected(MakeError(ErrDomain::Encode, r.error().code, "mm_pipeline::Encoder : TryOpen failed"));
 	}
-	
+
 	m_opened = true;
 	return {};
 }
@@ -43,10 +43,10 @@ std::expected<void, Error> Encoder::TryOpen(AVDictionary** options) noexcept
 std::expected<ffmpeg::SendResult, Error> Encoder::TrySend(const ffmpeg::Frame& frame) noexcept
 {
 	assert(m_opened && "Encoder::TrySend called on non-opened encoder");
-	
+
 	// If frame is empty (!frame), pass nullptr to flush
 	const AVFrame* framePtr = frame ? frame.get() : nullptr;
-	
+
 	auto r = m_ctx.TrySendFrame(framePtr);
 	if (!r) [[unlikely]]
 	{
@@ -59,7 +59,7 @@ std::expected<ffmpeg::ReceiveResult, Error> Encoder::TryReceive(ffmpeg::Packet& 
 {
 	assert(m_opened && "Encoder::TryReceive called on non-opened encoder");
 	assert(pkt && "Encoder::TryReceive called with empty packet");
-	
+
 	auto r = m_ctx.TryReceivePacket(*pkt);
 	if (!r) [[unlikely]]
 	{

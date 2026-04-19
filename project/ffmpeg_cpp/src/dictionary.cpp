@@ -17,12 +17,7 @@ std::expected<void, Error> Dictionary::TrySet(std::string_view key, std::string_
 		std::string keyStr(key);
 		std::string valueStr(value);
 
-		const int ret = av_dict_set(&m_dict, keyStr.c_str(), valueStr.c_str(), flags);
-		if (ret < 0) [[unlikely]]
-		{
-			return std::unexpected(ErrorFromFFmpegErrorCode(ret, "ffmpeg::Dictionary::TrySet"));
-		}
-		return {};
+		return ExpectedFromFFmpegErrorCode(av_dict_set(&m_dict, keyStr.c_str(), valueStr.c_str(), flags), "av_dict_set");
 	}
 	catch (...)
 	{
@@ -37,12 +32,7 @@ std::expected<void, Error> Dictionary::TrySet(std::string_view key, const char* 
 	{
 		std::string keyStr(key);
 
-		const int ret = av_dict_set(&m_dict, keyStr.c_str(), value, flags);
-		if (ret < 0) [[unlikely]]
-		{
-			return std::unexpected(ErrorFromFFmpegErrorCode(ret, "ffmpeg::Dictionary::TrySet"));
-		}
-		return {};
+		return ExpectedFromFFmpegErrorCode(av_dict_set(&m_dict, keyStr.c_str(), value, flags), "av_dict_set");
 	}
 	catch (...)
 	{

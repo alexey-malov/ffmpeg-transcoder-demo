@@ -80,8 +80,11 @@ std::expected<void, Error> OutputFormatContext::TryOpenFileIO() noexcept
 		return std::unexpected(MakeFFmpegError(ret, "avio_open2"));
 	}
 
-	m_state.ioOpened = true;
-	return {};
+	auto result = ExpectedFromFFmpegErrorCode(
+		avio_open2(&ctx->pb, ctx->url, AVIO_FLAG_WRITE, nullptr, nullptr), "avio_open2");
+	m_state.ioOpened = result.has_value();
+
+	return result;
 }
 
 std::expected<void, Error> OutputFormatContext::TryWriteHeader(AVDictionary** options) noexcept
@@ -96,12 +99,10 @@ std::expected<void, Error> OutputFormatContext::TryWriteHeader(AVDictionary** op
 	if (auto e = TryOpenFileIO(); !e)
 		return std::unexpected(e.error());
 
-	if (const int ret = avformat_write_header(m_ctx.get(), options); ret < 0) [[unlikely]]
-	{
-		return std::unexpected(MakeFFmpegError(ret, "avformat_write_header"));
-	}
+	auto result = ExpectedFromFFmpegErrorCode(avformat_write_header(m_ctx.get(), options), "avformat_write_header");
 
-	m_state.headerWritten = true;
+	m_state.headerWritten = result.has_value();
+
 	return {};
 }
 
@@ -116,11 +117,8 @@ std::expected<void, Error> OutputFormatContext::TryWritePacket(AVPacket& packet)
 		return std::unexpected(MakeFFmpegError(AVERROR(EINVAL), "TryWritePacket called before header"));
 	}
 
-	if (int ret = av_interleaved_write_frame(m_ctx.get(), &packet); ret < 0) [[unlikely]]
-	{
-		return std::unexpected(MakeFFmpegError(ret, "av_interleaved_write_frame"));
-	}
-	return {};
+	return ExpectedFromFFmpegErrorCode(
+		av_interleaved_write_frame(m_ctx.get(), &packet), "av_interleaved_write_frame");
 }
 
 std::expected<void, Error> OutputFormatContext::TryInterleavedWritePacket(AVPacket& packet) noexcept
@@ -134,11 +132,8 @@ std::expected<void, Error> OutputFormatContext::TryInterleavedWritePacket(AVPack
 		return std::unexpected(MakeFFmpegError(AVERROR(EINVAL), "TryInterleavedWritePacket called before header"));
 	}
 
-	if (int ret = av_interleaved_write_frame(m_ctx.get(), &packet); ret < 0) [[unlikely]]
-	{
-		return std::unexpected(MakeFFmpegError(ret, "av_interleaved_write_frame"));
-	}
-	return {};
+	return ExpectedFromFFmpegErrorCode(av_interleaved_write_frame(m_ctx.get(), &packet),
+		"av_interleaved_write_frame");
 }
 
 std::expected<void, Error> OutputFormatContext::TryWriteTrailer() noexcept
@@ -150,11 +145,13 @@ std::expected<void, Error> OutputFormatContext::TryWriteTrailer() noexcept
 	if (!m_state.headerWritten)
 		return {};
 
-	if (const int ret = av_write_trailer(m_ctx.get()); ret < 0) [[unlikely]]
-		return std::unexpected(MakeFFmpegError(ret, "av_write_trailer"));
+	auto result = ExpectedFromFFmpegErrorCode(av_write_trailer(m_ctx.get()),
+		"av_write_trailer");
 
-	m_state.headerWritten = false;
-	return {};
+	m_state.headerWritten = !result.has_value();
+	m_state.headerWritten = !result.has_value();
+
+	return result;
 }
 
 std::expected<void, Error> OutputFormatContext::TryClose() noexcept

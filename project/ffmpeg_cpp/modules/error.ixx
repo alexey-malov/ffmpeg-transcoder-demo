@@ -4,20 +4,14 @@ import std;
 namespace ffmpeg
 {
 
-export enum class ErrDomain : std::uint8_t {
-	None = 0,
-	FFMpeg,
-};
-
 export struct Error final
 {
 	int code = 0;
-	ErrDomain domain = ErrDomain::None;
 	const char* where = nullptr;
 
 	constexpr bool Ok() const noexcept
 	{
-		return domain == ErrDomain::None || code == 0;
+		return code == 0;
 	}
 
 	constexpr explicit operator bool() const noexcept
@@ -31,7 +25,7 @@ static_assert(std::is_trivially_copyable_v<Error>, "Error struct must be trivial
 
 export inline constexpr Error MakeFFmpegError(int code, const char* where)
 {
-	return { .code = code, .domain = ErrDomain::FFMpeg, .where = where };
+	return { .code = code, .where = where };
 }
 
 export class Exception : public std::exception
