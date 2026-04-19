@@ -13,11 +13,6 @@ export struct Error final
 	{
 		return code == 0;
 	}
-
-	constexpr explicit operator bool() const noexcept
-	{
-		return !Ok();
-	}
 };
 
 static_assert(sizeof(Error) <= 16, "Error struct size must not exceed 16 bytes");
@@ -52,7 +47,7 @@ private:
 
 export inline void ThrowIfError(const Error& error)
 {
-	if (error) [[unlikely]]
+	if (!error.Ok()) [[unlikely]]
 	{
 		throw Exception{ error };
 	}

@@ -189,7 +189,7 @@ Error OutputFormatContext::EnsureWritable(const char* where) const noexcept
 
 std::expected<AVStream*, Error> OutputFormatContext::TryAddStream() noexcept
 {
-	if (auto e = EnsureWritable("OutputFormatContext::TryAddStream(closed ctx)"); e) [[unlikely]]
+	if (auto e = EnsureWritable("OutputFormatContext::TryAddStream(closed ctx)"); !e.Ok()) [[unlikely]]
 		return std::unexpected(e);
 
 	if (m_state.headerWritten) [[unlikely]]
