@@ -118,7 +118,6 @@ private:
 
 	void SendPacket(Packet&& packet, Branch& branch, const FrameProcessor& frameProcessor)
 	{
-		// Send packet to video decoder
 		while (true)
 		{
 			auto sendResult = branch.decoder.TrySend(packet);
@@ -130,7 +129,6 @@ private:
 			if (*sendResult == ffmpeg::SendResult::Accepted)
 				break;
 
-			// NeedReceive: drain decoder
 			DrainDecoder(branch, frameProcessor);
 		}
 	}
@@ -170,8 +168,7 @@ private:
 			}
 			else if (*recvResult == ffmpeg::ReceiveResult::Produced)
 			{
-				// Use encoder's pkt_timebase for correct timestamp rescaling
-				m_muxer.WritePacket(branch.track, *pkt, branch.encoder.Context()->pkt_timebase);
+				m_muxer.WritePacket(branch.track, *pkt, branch.encoder.GetStreamTimeBase().ToAV());
 			}
 			else
 			{
@@ -201,7 +198,7 @@ private:
 			}
 			if (*encRecvResult == ffmpeg::ReceiveResult::Produced)
 			{
-				m_muxer.WritePacket(branch.track, *pkt, branch.encoder.Context()->pkt_timebase);
+				m_muxer.WritePacket(branch.track, *pkt, branch.encoder.GetStreamTimeBase().ToAV());
 			}
 			else if (*encRecvResult == ffmpeg::ReceiveResult::EndOfStream)
 			{
@@ -215,8 +212,7 @@ private:
 		auto sendResult = branch.encoder.TrySend(Frame::Null());
 		if (!sendResult)
 		{
-			std::cerr << "Encoder flush TrySend error: " << sendResult.error().code << "\n";
-			return;
+			throw Exception(sendResult.error());
 		}
 
 		// Drain encoder
@@ -226,13 +222,11 @@ private:
 			auto recvResult = branch.encoder.TryReceive(pkt);
 			if (!recvResult)
 			{
-				std::cerr << "Encoder flush TryReceive error: " << recvResult.error().code << "\n";
-				break;
+				throw Exception(recvResult.error());
 			}
 
 			if (*recvResult == ffmpeg::ReceiveResult::Produced)
 			{
-				// Use encoder's pkt_timebase for correct timestamp rescaling
 				m_muxer.WritePacket(branch.track, *pkt, branch.encoder.GetStreamTimeBase().ToAV());
 			}
 			else if (*recvResult == ffmpeg::ReceiveResult::EndOfStream)
