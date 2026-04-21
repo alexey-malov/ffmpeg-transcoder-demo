@@ -23,7 +23,7 @@ std::expected<SendResult, Error> MakeSendResultFromErrorCode(int code, const cha
 	case AVERROR_EOF:
 		return SendResult::Flushed;
 	default:
-		return std::unexpected(MakeFFmpegError(code, where));
+		return MakeUnexpected(code, where);
 	}
 }
 
@@ -38,7 +38,7 @@ std::expected<ReceiveResult, Error> MakeReceiveResultFromErrorCode(int code, con
 	case AVERROR_EOF:
 		return ReceiveResult::EndOfStream;
 	default:
-		return std::unexpected(MakeFFmpegError(code, where));
+		return MakeUnexpected(code, where);
 	}
 }
 
@@ -55,17 +55,17 @@ CodecContext::CodecContext(const AVCodec* codec)
 
 std::expected<void, Error> CodecContext::TryOpen(const AVCodec* codec, AVDictionary** options) noexcept
 {
-	return ExpectedFromFFmpegErrorCode(avcodec_open2(ctx(), codec, options), "avcodec_open2");
+	return ExpectedFromErrorCode(avcodec_open2(ctx(), codec, options), "avcodec_open2");
 }
 
 std::expected<void, Error> CodecContext::TryFromCodecParameters(const AVCodecParameters& par) noexcept
 {
-	return ExpectedFromFFmpegErrorCode(avcodec_parameters_to_context(ctx(), &par), "avcodec_parameters_to_context");
+	return ExpectedFromErrorCode(avcodec_parameters_to_context(ctx(), &par), "avcodec_parameters_to_context");
 }
 
 std::expected<void, Error> CodecContext::TryToCodecParameters(AVCodecParameters& par) const noexcept
 {
-	return ExpectedFromFFmpegErrorCode(avcodec_parameters_from_context(&par, ctx()), "avcodec_parameters_from_context");
+	return ExpectedFromErrorCode(avcodec_parameters_from_context(&par, ctx()), "avcodec_parameters_from_context");
 }
 
 std::expected<SendResult, Error> CodecContext::TrySendPacket(const AVPacket* pkt) noexcept

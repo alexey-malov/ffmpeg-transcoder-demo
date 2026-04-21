@@ -16,7 +16,7 @@ InputFormatContext::InputFormatContext(const char* url, const AVInputFormat* inp
 	AVDictionary** dictionary)
 	: m_ctx{ [url, inputFormat, dictionary] {
 		AVFormatContext* ctx = nullptr;
-		CheckFFmpegError(avformat_open_input(&ctx, url, inputFormat, dictionary), "avformat_open_input");
+		CheckErrorCode(avformat_open_input(&ctx, url, inputFormat, dictionary), "avformat_open_input");
 		return FormatContextPtr{ ctx };
 	}() }
 {
@@ -24,12 +24,12 @@ InputFormatContext::InputFormatContext(const char* url, const AVInputFormat* inp
 
 std::expected<void, Error> InputFormatContext::TryFindStreamInfo(AVDictionary** options) noexcept
 {
-	return ExpectedFromFFmpegErrorCode(avformat_find_stream_info(m_ctx.get(), options), "avformat_find_stream_info");
+	return ExpectedFromErrorCode(avformat_find_stream_info(m_ctx.get(), options), "avformat_find_stream_info");
 }
 
 std::expected<void, Error> InputFormatContext::TryReadFrame(AVPacket& packet) noexcept
 {
-	return ExpectedFromFFmpegErrorCode(av_read_frame(m_ctx.get(), &packet), "av_read_frame");
+	return ExpectedFromErrorCode(av_read_frame(m_ctx.get(), &packet), "av_read_frame");
 }
 
 } // namespace ffmpeg

@@ -44,12 +44,7 @@ public:
 	[[nodiscard]] std::expected<void, Error> TryMakeWritable() noexcept
 	{
 		assert(m_frame.get() != nullptr);
-		const int rc = av_frame_make_writable(m_frame.get());
-		if (rc < 0) [[unlikely]]
-		{
-			return std::unexpected(ErrorFromFFmpegErrorCode(rc, "av_frame_make_writable"));
-		}
-		return {};
+		return ExpectedFromErrorCode(av_frame_make_writable(m_frame.get()), "av_frame_make_writable");
 	}
 
 	template <typename Self>

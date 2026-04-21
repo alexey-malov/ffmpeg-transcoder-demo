@@ -36,7 +36,7 @@ public:
 
 	[[nodiscard]] std::expected<void, Error> TryCopyFrom(const AVCodecParameters& params) noexcept
 	{
-		return ExpectedFromFFmpegErrorCode(avcodec_parameters_copy(m_params.get(), &params), "avcodec_parameters_copy");
+		return ExpectedFromErrorCode(avcodec_parameters_copy(m_params.get(), &params), "avcodec_parameters_copy");
 	}
 
 	CodecParameters& operator=(const AVCodecParameters& params)

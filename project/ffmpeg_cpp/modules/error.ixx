@@ -11,16 +11,30 @@ export struct Error final
 
 	constexpr bool Ok() const noexcept
 	{
-		return code == 0;
+		return code >= 0;
 	}
 };
 
 static_assert(sizeof(Error) <= 16, "Error struct size must not exceed 16 bytes");
 static_assert(std::is_trivially_copyable_v<Error>, "Error struct must be trivially copyable");
 
-export inline constexpr Error MakeFFmpegError(int code, const char* where)
+export inline Error MakeError(int code, const char* where)
 {
 	return { .code = code, .where = where };
+}
+
+export inline std::unexpected<Error> MakeUnexpected(int code, const char* where) noexcept
+{
+	return std::unexpected<Error>(std::in_place, code, where);
+}
+
+export [[nodiscard]] inline std::expected<void, Error> ExpectedFromErrorCode(int code, const char* where) noexcept
+{
+	if (code < 0) [[unlikely]]
+	{
+		return MakeUnexpected(code, where);
+	}
+	return {};
 }
 
 export class Exception : public std::exception
@@ -45,38 +59,16 @@ private:
 	Error m_error;
 };
 
-export inline void ThrowIfError(const Error& error)
-{
-	if (!error.Ok()) [[unlikely]]
-	{
-		throw Exception{ error };
-	}
-}
-
-export inline Error ErrorFromFFmpegErrorCode(int code, const char* where) noexcept
-{
-	return code < 0 ? MakeFFmpegError(code, where) : Error{};
-}
-
-export [[noreturn]] void ThrowFFmpegError(int code, const char* where);
+export [[noreturn]] void ThrowError(int code, const char* where);
 
 export [[noreturn]] void ThrowFFmpegNoMem(const char* where);
 
-export inline void CheckFFmpegError(int code, const char* where)
+export inline void CheckErrorCode(int code, const char* where)
 {
 	if (code < 0) [[unlikely]]
 	{
-		ThrowFFmpegError(code, where);
+		ThrowError(code, where);
 	}
-}
-
-export [[nodiscard]] inline std::expected<void, Error> ExpectedFromFFmpegErrorCode(int code, const char* where) noexcept
-{
-	if (code < 0) [[unlikely]]
-	{
-		return std::unexpected(ErrorFromFFmpegErrorCode(code, where));
-	}
-	return {};
 }
 
 namespace detail
@@ -85,7 +77,7 @@ template <class E>
 concept ExpectedWithError = requires(E e) {
 	// expected-like API
 	{ bool(e) } -> std::convertible_to<bool>;
-	{ e.error() } -> std::same_as<Error&>; // ‰Îˇ const Ó·˙ÂÍÚÓ‚
+	{ e.error() } -> std::same_as<Error&>; // –¥–ª—è const –æ–±—ä–µ–∫—Ç–æ–≤
 	typename std::remove_reference_t<E>::value_type;
 } && std::same_as<typename std::remove_reference_t<E>::error_type, Error>;
 

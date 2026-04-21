@@ -9,12 +9,12 @@ namespace ffmpeg
 
 void ThrowFFmpegNoMem(const char* where)
 {
-	ThrowFFmpegError(AVERROR(ENOMEM), where);
+	ThrowError(AVERROR(ENOMEM), where);
 }
 
-void ThrowFFmpegError(int code, const char* where)
+void ThrowError(int code, const char* where)
 {
-	throw Exception{ MakeFFmpegError(code, where) };
+	throw Exception{ MakeError(code, where) };
 }
 
 } // namespace ffmpeg
