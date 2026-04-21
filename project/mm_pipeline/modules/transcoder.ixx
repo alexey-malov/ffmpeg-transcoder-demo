@@ -1,51 +1,42 @@
-module;
-
-export module mm_pipeline.async_transcoder;
+export module mm_pipeline.transcoder;
 
 import std;
 import mm_pipeline.encoder;
 import mm_pipeline.decoder;
-import mm_pipeline.async_encoder;
-import mm_pipeline.async_decoder;
 import mm_pipeline.muxer;
 import mm_pipeline.demuxer;
+import mm_pipeline.error;
 import ffmpeg.packet;
 import ffmpeg.frame;
 
 namespace mm_pipeline
 {
 
-export class AsyncTranscoder
+export class Transcoder
 {
 public:
 	using Frame = ffmpeg::Frame;
 	using Packet = ffmpeg::Packet;
-	using FrameProcessor = std::function<void(Frame& frame)>;
 
 	struct BranchConfig
 	{
-		AsyncDecoder& decoder;
-		AsyncEncoder& encoder;
+		Decoder& decoder;
+		Encoder& encoder;
 		int streamIndex = -1;
 		Muxer::TrackId track;
 	};
 
-	AsyncTranscoder(Muxer& muxer, Demuxer& demuxer,
+	Transcoder(Muxer& muxer, Demuxer& demuxer,
 		const BranchConfig& video, const BranchConfig& audio)
 		: m_muxer{ muxer }
 		, m_demuxer{ demuxer }
-		, m_video{ video.decoder, video.encoder, video.streamIndex, video.track }
-		, m_audio{ audio.decoder, audio.encoder, audio.streamIndex, audio.track }
+		, m_video{ video }
+		, m_audio{ audio }
 	{
 	}
 
 	void Run()
 	{
-		m_video.decoder.Start();
-		m_video.encoder.Start();
-		m_audio.decoder.Start();
-		m_audio.encoder.Start();
-
 		std::int64_t videoFrameCounter = 0;
 		std::int64_t audioPtsSamples = 0;
 
@@ -58,317 +49,207 @@ public:
 			audioPtsSamples += frame->nb_samples;
 		};
 
-		try
+		while (true)
 		{
-			while (!AllDone())
+			auto demuxResult = m_demuxer.TryRead();
+			if (!demuxResult)
 			{
-				bool progress = false;
+				throw Exception(demuxResult.error());
+			}
+			auto& pkt = *demuxResult;
 
-				progress |= DrainEncoder(m_video);
-				progress |= DrainEncoder(m_audio);
-
-				progress |= DrainDecoder(m_video, videoFrameProcessor);
-				progress |= DrainDecoder(m_audio, audioFrameProcessor);
-
-				progress |= FeedDemux();
-
-				if (!progress)
-				{
-					std::this_thread::yield();
-				}
+			if (!pkt)
+			{
+				break;
 			}
 
-			m_video.decoder.Join();
-			m_video.encoder.Join();
-			m_audio.decoder.Join();
-			m_audio.encoder.Join();
+			const int streamIndex = pkt->stream_index;
 
-			m_video.decoder.RethrowIfFailed();
-			m_video.encoder.RethrowIfFailed();
-			m_audio.decoder.RethrowIfFailed();
-			m_audio.encoder.RethrowIfFailed();
+			if (streamIndex == m_video.streamIndex)
+			{
+				SendPacket(std::move(pkt), m_video, videoFrameProcessor);
+
+				// Drain decoder after sending
+				DrainDecoder(m_video, videoFrameProcessor);
+			}
+			else if (streamIndex == m_audio.streamIndex)
+			{
+				SendPacket(std::move(pkt), m_audio, audioFrameProcessor);
+
+				// Drain decoder after sending
+				DrainDecoder(m_audio, audioFrameProcessor);
+			}
 		}
-		catch (...)
+
+		// Flush decoders and encoders
+		auto flushPkt = Packet::Null();
+
+		if (auto videoSendResult = m_video.decoder.TrySend(flushPkt))
 		{
-			RequestStop();
-
-			m_video.decoder.Join();
-			m_video.encoder.Join();
-			m_audio.decoder.Join();
-			m_audio.encoder.Join();
-
-			throw;
+			DrainDecoder(m_video, videoFrameProcessor);
 		}
-	}
+		if (auto audioSendResult = m_audio.decoder.TrySend(flushPkt))
+		{
+			DrainDecoder(m_audio, audioFrameProcessor);
+		}
 
-	void RequestStop()
-	{
-		m_video.decoder.RequestStop();
-		m_video.encoder.RequestStop();
-		m_audio.decoder.RequestStop();
-		m_audio.encoder.RequestStop();
+		// Flush encoders
+		FlushEncoder(m_video);
+		FlushEncoder(m_audio);
 	}
 
 private:
 	struct Branch
 	{
-		AsyncDecoder& decoder;
-		AsyncEncoder& encoder;
+		explicit Branch(const BranchConfig& cfg)
+			: decoder{ cfg.decoder }
+			, encoder{ cfg.encoder }
+			, streamIndex{ cfg.streamIndex }
+			, track{ cfg.track }
+		{
+		}
+		Decoder& decoder;
+		Encoder& encoder;
 		int streamIndex = -1;
 		Muxer::TrackId track;
-
-		bool decoderInputClosed = false;
-		bool decoderEof = false;
-		bool encoderInputClosed = false;
-		bool encoderEof = false;
-
-		std::optional<Packet> pendingPacket;
-
-		std::optional<Frame> pendingFrame;
 	};
 
-	bool AllDone() const noexcept
-	{
-		return m_video.encoderEof && m_audio.encoderEof;
-	}
+	using FrameProcessor = std::function<void(Frame&)>;
 
-	// Returns true if any progress was made.
-	bool DrainEncoder(Branch& branch)
+	void SendPacket(Packet&& packet, Branch& branch, const FrameProcessor& frameProcessor)
 	{
-		bool progress = false;
-
+		// Send packet to video decoder
 		while (true)
 		{
-			auto popResult = branch.encoder.TryPop();
-			if (!popResult)
+			auto sendResult = branch.decoder.TrySend(packet);
+			if (!sendResult)
 			{
-				switch (popResult.error())
-				{
-				case AsyncEncoder::TryPopError::Empty:
-					return progress;
-
-				case AsyncEncoder::TryPopError::Stopped:
-					throw AsyncEncoder::CancelException{};
-
-				case AsyncEncoder::TryPopError::Failed:
-					branch.encoder.RethrowIfFailed();
-					throw std::logic_error("AsyncEncoder::TryPop returned Failed but no exception was stored");
-				}
+				throw Exception(sendResult.error());
 			}
 
-			auto pkt = std::move(*popResult);
-
-			if (!pkt)
-			{
-				branch.encoderEof = true;
-				return true;
-			}
-
-			m_muxer.WritePacket(branch.track, *pkt, branch.encoder.GetStreamTimeBase().ToAV());
-			progress = true;
-		}
-	}
-
-	bool DrainDecoder(Branch& branch, const FrameProcessor& frameProcessor)
-	{
-		bool progress = false;
-
-		// 1. Сначала пытаемся протолкнуть ранее не принятый encoder-ом frame.
-		if (branch.pendingFrame)
-		{
-			auto pushResult = branch.encoder.TryPush(std::move(*branch.pendingFrame));
-			switch (pushResult)
-			{
-			case AsyncEncoder::TryPushResult::Ok:
-				branch.pendingFrame.reset();
-				progress = true;
+			if (*sendResult == ffmpeg::SendResult::Accepted)
 				break;
 
-			case AsyncEncoder::TryPushResult::Full:
-				return progress;
-
-			case AsyncEncoder::TryPushResult::Stopped:
-				throw AsyncEncoder::CancelException{};
-
-			case AsyncEncoder::TryPushResult::Failed:
-				branch.encoder.RethrowIfFailed();
-				throw std::logic_error("AsyncEncoder::TryPush returned Failed but no exception was stored");
-			}
+			// NeedReceive: drain decoder
+			DrainDecoder(branch, frameProcessor);
 		}
+	}
 
-		// 2. Read new frames from decoder
+	void DrainDecoder(Branch& branch, const FrameProcessor& frameProcessor)
+	{
+		Frame frame;
 		while (true)
 		{
-			auto popResult = branch.decoder.TryPop();
-			if (!popResult)
+			auto recvResult = branch.decoder.TryReceive(frame);
+			if (!recvResult)
 			{
-				switch (popResult.error())
-				{
-				case AsyncDecoder::TryPopError::Empty:
-					return progress;
-
-				case AsyncDecoder::TryPopError::Stopped:
-					throw AsyncDecoder::CancelException{};
-
-				case AsyncDecoder::TryPopError::Failed:
-					branch.decoder.RethrowIfFailed();
-					throw std::logic_error("AsyncDecoder::TryPop returned Failed but no exception was stored");
-				}
+				throw Exception(recvResult.error());
 			}
-
-			Frame frame = std::move(*popResult);
-
-			if (!frame)
-			{
-				branch.decoderEof = true;
-
-				if (!branch.encoderInputClosed)
-				{
-					branch.encoder.CloseInput();
-					branch.encoderInputClosed = true;
-				}
-
-				return true;
-			}
-
+			if (*recvResult == ffmpeg::ReceiveResult::EndOfStream)
+				break;
+			if (*recvResult == ffmpeg::ReceiveResult::NeedSend)
+				break;
 			frameProcessor(frame);
 
-			auto pushResult = branch.encoder.TryPush(std::move(frame));
-			switch (pushResult)
+			SendFrameToEncoder(frame, branch);
+
+			DrainEncoder(branch);
+		}
+	}
+
+	void DrainEncoder(Branch& branch)
+	{
+		while (true)
+		{
+			Packet pkt;
+			auto recvResult = branch.encoder.TryReceive(pkt);
+			if (!recvResult)
 			{
-			case AsyncEncoder::TryPushResult::Ok:
-				progress = true;
+				std::cerr << "Encoder TryReceive error: " << recvResult.error().code << "\n";
 				break;
-
-			case AsyncEncoder::TryPushResult::Full:
-				branch.pendingFrame = std::move(frame);
-				return true;
-
-			case AsyncEncoder::TryPushResult::Stopped:
-				throw AsyncEncoder::CancelException{};
-
-			case AsyncEncoder::TryPushResult::Failed:
-				branch.encoder.RethrowIfFailed();
-				throw std::logic_error("AsyncEncoder::TryPush returned Failed but no exception was stored");
 			}
-		}
-	}
-
-	static std::optional<bool> TryFlushPendingPacket(Branch& branch)
-	{
-		if (branch.pendingPacket)
-		{
-			auto pushResult = branch.decoder.TryPush(std::move(*branch.pendingPacket));
-			switch (pushResult)
+			else if (*recvResult == ffmpeg::ReceiveResult::Produced)
 			{
-			case AsyncDecoder::TryPushResult::Ok:
-				branch.pendingPacket.reset();
-				return true;
-
-			case AsyncDecoder::TryPushResult::Full:
-				return false;
-
-			case AsyncDecoder::TryPushResult::Stopped:
-				throw AsyncDecoder::CancelException{};
-
-			case AsyncDecoder::TryPushResult::Failed:
-				branch.decoder.RethrowIfFailed();
-				throw std::logic_error("AsyncDecoder::TryPush returned Failed but no exception was stored");
+				// Use encoder's pkt_timebase for correct timestamp rescaling
+				m_muxer.WritePacket(branch.track, *pkt, branch.encoder.Context()->pkt_timebase);
+			}
+			else
+			{
+				break;
 			}
 		}
-		return std::nullopt;
 	}
 
-	bool FeedDemux()
+	void SendFrameToEncoder(Frame& frame, Branch& branch)
 	{
-		if (m_demuxEof)
+		// Send frame to encoder
+		while (true)
 		{
-			return false;
+			auto sendResult = branch.encoder.TrySend(frame);
+			if (!sendResult)
+			{
+				throw Exception(sendResult.error());
+			}
+			if (*sendResult == ffmpeg::SendResult::Accepted || *sendResult == ffmpeg::SendResult::Flushed)
+				break;
+			// NeedReceive: drain encoder
+			Packet pkt;
+			auto encRecvResult = branch.encoder.TryReceive(pkt);
+			if (!encRecvResult)
+			{
+				throw Exception(encRecvResult.error());
+			}
+			if (*encRecvResult == ffmpeg::ReceiveResult::Produced)
+			{
+				m_muxer.WritePacket(branch.track, *pkt, branch.encoder.Context()->pkt_timebase);
+			}
+			else if (*encRecvResult == ffmpeg::ReceiveResult::EndOfStream)
+			{
+				break;
+			}
 		}
-
-		// Сначала пытаемся протолкнуть уже прочитанный, но не принятый decoder-ом packet.
-		if (auto flushResult = TryFlushPendingPacket(m_video))
-		{
-			return *flushResult;
-		}
-		if (auto flushResult = TryFlushPendingPacket(m_audio))
-		{
-			return *flushResult;
-		}
-
-		auto readResult = m_demuxer.TryRead();
-		if (!readResult)
-		{
-			throw Exception{ readResult.error() };
-		}
-
-		auto& packet = *readResult;
-
-		if (!packet)
-		{
-			m_demuxEof = true;
-			CloseDecoders();
-			return true;
-		}
-
-		const int streamIndex = packet->stream_index;
-
-		Branch* branch = nullptr;
-		if (streamIndex == m_video.streamIndex)
-		{
-			branch = &m_video;
-		}
-		else if (streamIndex == m_audio.streamIndex)
-		{
-			branch = &m_audio;
-		}
-		else
-		{
-			return true;
-		}
-
-		auto pushResult = branch->decoder.TryPush(std::move(packet));
-		switch (pushResult)
-		{
-		case AsyncDecoder::TryPushResult::Ok:
-			return true;
-
-		case AsyncDecoder::TryPushResult::Full:
-			branch->pendingPacket = std::move(packet);
-			return true;
-
-		case AsyncDecoder::TryPushResult::Stopped:
-			throw AsyncDecoder::CancelException{};
-
-		case AsyncDecoder::TryPushResult::Failed:
-			branch->decoder.RethrowIfFailed();
-			throw std::logic_error("AsyncDecoder::TryPush returned Failed but no exception was stored");
-		}
-
-		throw std::logic_error("AsyncDecoder::TryPush returned invalid result");
 	}
 
-	void CloseDecoders()
+	void FlushEncoder(Branch& branch)
 	{
-		if (!m_video.decoderInputClosed)
+		auto sendResult = branch.encoder.TrySend(Frame::Null());
+		if (!sendResult)
 		{
-			m_video.decoder.CloseInput();
-			m_video.decoderInputClosed = true;
+			std::cerr << "Encoder flush TrySend error: " << sendResult.error().code << "\n";
+			return;
 		}
-		if (!m_audio.decoderInputClosed)
+
+		// Drain encoder
+		while (true)
 		{
-			m_audio.decoder.CloseInput();
-			m_audio.decoderInputClosed = true;
+			Packet pkt;
+			auto recvResult = branch.encoder.TryReceive(pkt);
+			if (!recvResult)
+			{
+				std::cerr << "Encoder flush TryReceive error: " << recvResult.error().code << "\n";
+				break;
+			}
+
+			if (*recvResult == ffmpeg::ReceiveResult::Produced)
+			{
+				// Use encoder's pkt_timebase for correct timestamp rescaling
+				m_muxer.WritePacket(branch.track, *pkt, branch.encoder.GetStreamTimeBase().ToAV());
+			}
+			else if (*recvResult == ffmpeg::ReceiveResult::EndOfStream)
+			{
+				break;
+			}
+			else
+			{
+				break;
+			}
 		}
 	}
 
 	Muxer& m_muxer;
 	Demuxer& m_demuxer;
-
-	Branch m_video;
 	Branch m_audio;
-
-	bool m_demuxEof = false;
+	Branch m_video;
 };
 
 } // namespace mm_pipeline

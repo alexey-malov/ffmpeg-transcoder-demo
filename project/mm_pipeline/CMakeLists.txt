@@ -19,6 +19,7 @@ target_sources(mm_pipeline
     FILE_SET cxx_modules TYPE CXX_MODULES FILES
     "modules/async_decoder.ixx"
     "modules/async_encoder.ixx"
+    "modules/async_transcoder.ixx"
     "modules/demuxer.ixx"
     "modules/error.ixx"
     "modules/muxer.ixx"
@@ -30,7 +31,7 @@ target_sources(mm_pipeline
     "src/muxer.cpp"
     "src/decoder.cpp"
     "src/encoder.cpp"
-)
+ )
 
 target_include_directories(mm_pipeline
   PUBLIC
