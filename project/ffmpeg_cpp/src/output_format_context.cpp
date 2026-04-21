@@ -108,13 +108,8 @@ std::expected<void, Error> OutputFormatContext::TryWritePacket(AVPacket& packet)
 std::expected<void, Error> OutputFormatContext::TryInterleavedWritePacket(AVPacket& packet) noexcept
 {
 	assert(m_ctx); // We must not use a moved-from OutputFormatContext
-	if (m_state.closed) [[unlikely]]
-		return MakeUnexpected(AVERROR(EINVAL), "OutputFormatContext::TryInterleavedWritePacket(closed)");
-
-	if (!m_state.headerWritten)
-	{
-		return MakeUnexpected(AVERROR(EINVAL), "TryInterleavedWritePacket called before header");
-	}
+	assert(!m_state.closed && "OutputFormatContext::TryInterleavedWritePacket(closed)");
+	assert(m_state.headerWritten && "TryInterleavedWritePacket called before header");
 
 	return ExpectedFromErrorCode(av_interleaved_write_frame(m_ctx.get(), &packet),
 		"av_interleaved_write_frame");
@@ -123,15 +118,13 @@ std::expected<void, Error> OutputFormatContext::TryInterleavedWritePacket(AVPack
 std::expected<void, Error> OutputFormatContext::TryWriteTrailer() noexcept
 {
 	assert(m_ctx); // We must not use a moved-from OutputFormatContext
-	if (m_state.closed) [[unlikely]]
-		return MakeUnexpected(AVERROR(EINVAL), "OutputFormatContext::TryWriteTrailer(closed)");
+	assert(!m_state.closed && "OutputFormatContext::TryWriteTrailer(closed)");
 
 	if (!m_state.headerWritten)
 		return {};
 
 	auto result = ExpectedFromErrorCode(av_write_trailer(m_ctx.get()), "av_write_trailer");
 
-	m_state.headerWritten = !result.has_value();
 	m_state.headerWritten = !result.has_value();
 
 	return result;
@@ -172,11 +165,8 @@ Error OutputFormatContext::EnsureWritable(const char* where) const noexcept
 
 std::expected<AVStream*, Error> OutputFormatContext::TryAddStream() noexcept
 {
-	if (auto e = EnsureWritable("OutputFormatContext::TryAddStream(closed ctx)"); !e.Ok()) [[unlikely]]
-		return std::unexpected(e);
-
-	if (m_state.headerWritten) [[unlikely]]
-		return MakeUnexpected(AVERROR(EINVAL), "TryAddStream called after header");
+	assert(EnsureWritable("OutputFormatContext::TryAddStream").Ok() && "Stream is not writable");
+	assert(!m_state.headerWritten && "TryAddStream called after header");
 
 	AVStream* st = avformat_new_stream(m_ctx.get(), /* codec= */ nullptr);
 	if (!st) [[unlikely]]
