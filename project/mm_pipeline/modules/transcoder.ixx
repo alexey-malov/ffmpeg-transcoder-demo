@@ -155,24 +155,28 @@ private:
 		}
 	}
 
-	void DrainEncoder(Branch& branch)
+	// Returns true if stream needs send and false on End of Stream
+	bool DrainEncoder(Branch& branch)
 	{
+		using ffmpeg::ReceiveResult;
+
 		while (true)
 		{
 			Packet pkt;
 			auto recvResult = branch.encoder.TryReceive(pkt);
 			if (!recvResult)
 			{
-				std::cerr << "Encoder TryReceive error: " << recvResult.error().code << "\n";
-				break;
+				throw Exception(recvResult.error());
 			}
-			else if (*recvResult == ffmpeg::ReceiveResult::Produced)
+			switch (*recvResult)
 			{
+			case ReceiveResult::Produced:
 				m_muxer.WritePacket(branch.track, *pkt, branch.encoder.GetStreamTimeBase().ToAV());
-			}
-			else
-			{
 				break;
+			case ReceiveResult::NeedSend:
+				return true;
+			case ReceiveResult::EndOfStream:
+				return false;
 			}
 		}
 	}
@@ -189,18 +193,8 @@ private:
 			}
 			if (*sendResult == ffmpeg::SendResult::Accepted || *sendResult == ffmpeg::SendResult::Flushed)
 				break;
-			// NeedReceive: drain encoder
-			Packet pkt;
-			auto encRecvResult = branch.encoder.TryReceive(pkt);
-			if (!encRecvResult)
-			{
-				throw Exception(encRecvResult.error());
-			}
-			if (*encRecvResult == ffmpeg::ReceiveResult::Produced)
-			{
-				m_muxer.WritePacket(branch.track, *pkt, branch.encoder.GetStreamTimeBase().ToAV());
-			}
-			else if (*encRecvResult == ffmpeg::ReceiveResult::EndOfStream)
+
+			if (!DrainEncoder(branch))
 			{
 				break;
 			}
@@ -215,29 +209,7 @@ private:
 			throw Exception(sendResult.error());
 		}
 
-		// Drain encoder
-		while (true)
-		{
-			Packet pkt;
-			auto recvResult = branch.encoder.TryReceive(pkt);
-			if (!recvResult)
-			{
-				throw Exception(recvResult.error());
-			}
-
-			if (*recvResult == ffmpeg::ReceiveResult::Produced)
-			{
-				m_muxer.WritePacket(branch.track, *pkt, branch.encoder.GetStreamTimeBase().ToAV());
-			}
-			else if (*recvResult == ffmpeg::ReceiveResult::EndOfStream)
-			{
-				break;
-			}
-			else
-			{
-				break;
-			}
-		}
+		DrainEncoder(branch);
 	}
 
 	Muxer& m_muxer;
