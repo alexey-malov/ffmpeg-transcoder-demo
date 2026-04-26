@@ -232,10 +232,10 @@ int main(int argc, char* argv[])
 
 		av_log_set_level(AV_LOG_ERROR);
 
-		mm_pipeline::AsyncEncoder asyncAudioEncoder{ std::move(audioEnc), 20, 20 };
-		mm_pipeline::AsyncEncoder asyncVideoEncoder{ std::move(videoEnc), 20, 20 };
-		mm_pipeline::AsyncDecoder asyncAudioDecoder{ std::move(audioDec), 20, 20 };
-		mm_pipeline::AsyncDecoder asyncVideoDecoder{ std::move(videoDec), 20, 20 };
+		mm_pipeline::AsyncEncoder asyncAudioEncoder{ std::move(audioEnc), 2, 2 };
+		mm_pipeline::AsyncEncoder asyncVideoEncoder{ std::move(videoEnc), 2, 2 };
+		mm_pipeline::AsyncDecoder asyncAudioDecoder{ std::move(audioDec), 2, 2 };
+		mm_pipeline::AsyncDecoder asyncVideoDecoder{ std::move(videoDec), 2, 2 };
 
 		mm_pipeline::AsyncTranscoder asyncTranscoder{
 			muxer, demuxer,
@@ -258,6 +258,7 @@ int main(int argc, char* argv[])
 		muxer.Close();
 
 		std::cout << "Output written to: " << outputPath << "\n";
+		std::cout << "Packets written: " << asyncTranscoder.GetPacketsWritten() << "\n";
 		return 0;
 	}
 	catch (const mm_pipeline::Exception& e)
