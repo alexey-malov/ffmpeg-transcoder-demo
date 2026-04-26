@@ -41,11 +41,11 @@ public:
 		std::int64_t videoFrameCounter = 0;
 		std::int64_t audioPtsSamples = 0;
 
-		const FrameProcessor videoFrameProcessor = [&videoFrameCounter](Frame& frame) {
+		const FrameProcessor processVideoFrame = [&videoFrameCounter](Frame& frame) {
 			frame->pts = videoFrameCounter++;
 		};
 
-		const FrameProcessor audioFrameProcessor = [&audioPtsSamples](Frame& frame) {
+		const FrameProcessor processAudioFrame = [&audioPtsSamples](Frame& frame) {
 			frame->pts = audioPtsSamples;
 			audioPtsSamples += frame->nb_samples;
 		};
@@ -54,16 +54,16 @@ public:
 		{
 			if (pkt->stream_index == m_video.streamIndex)
 			{
-				SendPacket(pkt, m_video, videoFrameProcessor);
+				SendPacket(pkt, m_video, processVideoFrame);
 			}
 			else if (pkt->stream_index == m_audio.streamIndex)
 			{
-				SendPacket(pkt, m_audio, audioFrameProcessor);
+				SendPacket(pkt, m_audio, processAudioFrame);
 			}
 		}
 
-		Flush(m_video, videoFrameProcessor);
-		Flush(m_audio, audioFrameProcessor);
+		Flush(m_video, processVideoFrame);
+		Flush(m_audio, processAudioFrame);
 	}
 
 	[[nodiscard]] std::uint64_t GetPacketsWritten() const noexcept { return m_packetsWritten; }
@@ -86,55 +86,48 @@ private:
 
 	using FrameProcessor = std::function<void(Frame&)>;
 
-	void SendPacket(const Packet& packet, Branch& branch, const FrameProcessor& frameProcessor)
+	void SendPacket(const Packet& packet, Branch& branch, const FrameProcessor& processor)
 	{
 		while (branch.decoder.Send(packet) != ffmpeg::SendResult::Accepted)
 		{
-			DrainDecoder(branch, frameProcessor);
+			DrainDecoder(branch, processor);
 		}
-		DrainDecoder(branch, frameProcessor);
+		DrainDecoder(branch, processor);
 	}
 
-	void DrainDecoder(Branch& branch, const FrameProcessor& frameProcessor)
+	void DrainDecoder(Branch& branch, const FrameProcessor& process)
 	{
 		Frame frame;
 		while (branch.decoder.Receive(frame) == ffmpeg::ReceiveResult::Produced)
 		{
-			frameProcessor(frame);
+			process(frame);
 
 			SendFrame(frame, branch);
 		}
-	}
-
-	// true  -> encoder needs more input
-	// false -> encoder reached EOF
-	bool DrainEncoder(Branch& branch)
-	{
-		Packet pkt;
-		ffmpeg::ReceiveResult recvResult;
-		while ((recvResult = branch.encoder.Receive(pkt)) == ffmpeg::ReceiveResult::Produced)
-		{
-			m_muxer.WritePacket(branch.track, *pkt, branch.encoder.GetStreamTimeBase().ToAV());
-			++m_packetsWritten;
-		}
-		return recvResult == ffmpeg::ReceiveResult::NeedSend;
 	}
 
 	void SendFrame(const Frame& frame, Branch& branch)
 	{
 		while (branch.encoder.Send(frame) == ffmpeg::SendResult::NeedReceive)
 		{
-			if (!DrainEncoder(branch))
-			{
-				break;
-			}
+			DrainEncoder(branch);
 		}
 		DrainEncoder(branch);
 	}
 
-	void Flush(Branch& branch, const FrameProcessor& frameProcessor)
+	void DrainEncoder(Branch& branch)
 	{
-		SendPacket(Packet::Null(), branch, frameProcessor);
+		Packet pkt;
+		while (branch.encoder.Receive(pkt) == ffmpeg::ReceiveResult::Produced)
+		{
+			m_muxer.WritePacket(branch.track, *pkt, branch.encoder.GetStreamTimeBase().ToAV());
+			++m_packetsWritten;
+		}
+	}
+
+	void Flush(Branch& branch, const FrameProcessor& process)
+	{
+		SendPacket(Packet::Null(), branch, process);
 		SendFrame(Frame::Null(), branch);
 	}
 
