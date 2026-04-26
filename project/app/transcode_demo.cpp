@@ -255,6 +255,8 @@ int main(int argc, char* argv[])
 		muxer.Close();
 
 		std::cout << "Output written to: " << outputPath << "\n";
+
+		std::cout << "Packets written: " << transcoder.GetPacketsWritten() << "\n";
 		return 0;
 	}
 	catch (const mm_pipeline::Exception& e)
