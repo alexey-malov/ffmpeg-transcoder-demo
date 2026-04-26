@@ -35,9 +35,17 @@ public:
 
 	// empty frame => flush
 	[[nodiscard]] std::expected<ffmpeg::SendResult, Error> TrySend(const ffmpeg::Frame& frame) noexcept;
+	[[nodiscard]] ffmpeg::SendResult Send(const ffmpeg::Frame& frame)
+	{
+		return Check(TrySend(frame));
+	}
 
 	// produces encoded packets into pkt (pkt is an RAII wrapper)
 	[[nodiscard]] std::expected<ffmpeg::ReceiveResult, Error> TryReceive(ffmpeg::Packet& pkt) noexcept;
+	[[nodiscard]] ffmpeg::ReceiveResult Receive(ffmpeg::Packet& pkt)
+	{
+		return Check(TryReceive(pkt));
+	}
 
 	// Export encoder parameters (e.g. for muxer track codecpar).
 	[[nodiscard]] std::expected<void, Error> TryToCodecParameters(AVCodecParameters& out) const noexcept;

@@ -38,6 +38,11 @@ public:
 
 	// Returns Null packet on EOF
 	[[nodiscard]] std::expected<ffmpeg::Packet, Error> TryRead();
+	
+	[[nodiscard]] ffmpeg::Packet Read()
+	{
+		return Check(TryRead());
+	}
 
 	[[nodiscard]] unsigned int GetStreamCount() const noexcept { return m_ctx->nb_streams; }
 

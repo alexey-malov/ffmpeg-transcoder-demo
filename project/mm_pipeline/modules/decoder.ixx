@@ -30,7 +30,17 @@ public:
 	// pkt == nullptr => flush
 	[[nodiscard]] std::expected<ffmpeg::SendResult, Error> TrySend(const ffmpeg::Packet& pkt) noexcept;
 
+	[[nodiscard]] ffmpeg::SendResult Send(const ffmpeg::Packet& pkt)
+	{
+		return Check(TrySend(pkt));
+	}
+
 	[[nodiscard]] std::expected<ffmpeg::ReceiveResult, Error> TryReceive(ffmpeg::Frame& frame) noexcept;
+
+	[[nodiscard]] ffmpeg::ReceiveResult Receive(ffmpeg::Frame& frame)
+	{
+		return Check(TryReceive(frame));
+	}
 
 	[[nodiscard]] ffmpeg::Rational GetStreamTimeBase() const noexcept { return m_streamTimeBase; }
 

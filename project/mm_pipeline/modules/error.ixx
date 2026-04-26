@@ -59,4 +59,38 @@ private:
 	Error m_error;
 };
 
+namespace detail
+{
+template <class E>
+concept ExpectedWithError = requires(E e) {
+	// expected-like API
+	{ bool(e) } -> std::convertible_to<bool>;
+	{ e.error() } -> std::same_as<Error&>; // для const объектов
+	typename std::remove_reference_t<E>::value_type;
+} && std::same_as<typename std::remove_reference_t<E>::error_type, Error>;
+
+} // namespace detail
+
+export template <class E>
+	requires detail::ExpectedWithError<E>
+decltype(auto) Check(E&& exp)
+{
+	using Exp = std::remove_reference_t<E>;
+	using T = typename Exp::value_type;
+
+	if (!exp)
+	{
+		throw Exception{ exp.error() };
+	}
+
+	if constexpr (std::is_void_v<T>)
+	{
+		return;
+	}
+	else
+	{
+		return *std::forward<E>(exp);
+	}
+}
+
 } // namespace mm_pipeline
