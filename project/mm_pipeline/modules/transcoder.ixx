@@ -37,6 +37,7 @@ public:
 
 	void Run()
 	{
+		m_packetsWritten = 0;
 		std::int64_t videoFrameCounter = 0;
 		std::int64_t audioPtsSamples = 0;
 
@@ -49,54 +50,23 @@ public:
 			audioPtsSamples += frame->nb_samples;
 		};
 
-		while (true)
+		for (Packet pkt; pkt = m_demuxer.Read();)
 		{
-			auto demuxResult = m_demuxer.TryRead();
-			if (!demuxResult)
+			if (pkt->stream_index == m_video.streamIndex)
 			{
-				throw Exception(demuxResult.error());
+				SendPacket(pkt, m_video, videoFrameProcessor);
 			}
-			auto& pkt = *demuxResult;
-
-			if (!pkt)
+			else if (pkt->stream_index == m_audio.streamIndex)
 			{
-				break;
-			}
-
-			const int streamIndex = pkt->stream_index;
-
-			if (streamIndex == m_video.streamIndex)
-			{
-				SendPacket(std::move(pkt), m_video, videoFrameProcessor);
-
-				// Drain decoder after sending
-				DrainDecoder(m_video, videoFrameProcessor);
-			}
-			else if (streamIndex == m_audio.streamIndex)
-			{
-				SendPacket(std::move(pkt), m_audio, audioFrameProcessor);
-
-				// Drain decoder after sending
-				DrainDecoder(m_audio, audioFrameProcessor);
+				SendPacket(pkt, m_audio, audioFrameProcessor);
 			}
 		}
 
-		// Flush decoders and encoders
-		auto flushPkt = Packet::Null();
-
-		if (auto videoSendResult = m_video.decoder.TrySend(flushPkt))
-		{
-			DrainDecoder(m_video, videoFrameProcessor);
-		}
-		if (auto audioSendResult = m_audio.decoder.TrySend(flushPkt))
-		{
-			DrainDecoder(m_audio, audioFrameProcessor);
-		}
-
-		// Flush encoders
-		FlushEncoder(m_video);
-		FlushEncoder(m_audio);
+		Flush(m_video, videoFrameProcessor);
+		Flush(m_audio, audioFrameProcessor);
 	}
+
+	[[nodiscard]] std::uint64_t GetPacketsWritten() const noexcept { return m_packetsWritten; }
 
 private:
 	struct Branch
@@ -116,106 +86,63 @@ private:
 
 	using FrameProcessor = std::function<void(Frame&)>;
 
-	void SendPacket(Packet&& packet, Branch& branch, const FrameProcessor& frameProcessor)
+	void SendPacket(const Packet& packet, Branch& branch, const FrameProcessor& frameProcessor)
 	{
-		while (true)
+		while (branch.decoder.Send(packet) != ffmpeg::SendResult::Accepted)
 		{
-			auto sendResult = branch.decoder.TrySend(packet);
-			if (!sendResult)
-			{
-				throw Exception(sendResult.error());
-			}
-
-			if (*sendResult == ffmpeg::SendResult::Accepted)
-				break;
-
 			DrainDecoder(branch, frameProcessor);
 		}
+		DrainDecoder(branch, frameProcessor);
 	}
 
 	void DrainDecoder(Branch& branch, const FrameProcessor& frameProcessor)
 	{
 		Frame frame;
-		while (true)
+		while (branch.decoder.Receive(frame) == ffmpeg::ReceiveResult::Produced)
 		{
-			auto recvResult = branch.decoder.TryReceive(frame);
-			if (!recvResult)
-			{
-				throw Exception(recvResult.error());
-			}
-			if (*recvResult == ffmpeg::ReceiveResult::EndOfStream)
-				break;
-			if (*recvResult == ffmpeg::ReceiveResult::NeedSend)
-				break;
 			frameProcessor(frame);
 
-			SendFrameToEncoder(frame, branch);
-
-			DrainEncoder(branch);
+			SendFrame(frame, branch);
 		}
 	}
 
-	// Returns true if stream needs send and false on End of Stream
+	// true  -> encoder needs more input
+	// false -> encoder reached EOF
 	bool DrainEncoder(Branch& branch)
 	{
-		using ffmpeg::ReceiveResult;
-
-		while (true)
+		Packet pkt;
+		ffmpeg::ReceiveResult recvResult;
+		while ((recvResult = branch.encoder.Receive(pkt)) == ffmpeg::ReceiveResult::Produced)
 		{
-			Packet pkt;
-			auto recvResult = branch.encoder.TryReceive(pkt);
-			if (!recvResult)
-			{
-				throw Exception(recvResult.error());
-			}
-			switch (*recvResult)
-			{
-			case ReceiveResult::Produced:
-				m_muxer.WritePacket(branch.track, *pkt, branch.encoder.GetStreamTimeBase().ToAV());
-				break;
-			case ReceiveResult::NeedSend:
-				return true;
-			case ReceiveResult::EndOfStream:
-				return false;
-			}
+			m_muxer.WritePacket(branch.track, *pkt, branch.encoder.GetStreamTimeBase().ToAV());
+			++m_packetsWritten;
 		}
+		return recvResult == ffmpeg::ReceiveResult::NeedSend;
 	}
 
-	void SendFrameToEncoder(Frame& frame, Branch& branch)
+	void SendFrame(const Frame& frame, Branch& branch)
 	{
-		// Send frame to encoder
-		while (true)
+		while (branch.encoder.Send(frame) == ffmpeg::SendResult::NeedReceive)
 		{
-			auto sendResult = branch.encoder.TrySend(frame);
-			if (!sendResult)
-			{
-				throw Exception(sendResult.error());
-			}
-			if (*sendResult == ffmpeg::SendResult::Accepted || *sendResult == ffmpeg::SendResult::Flushed)
-				break;
-
 			if (!DrainEncoder(branch))
 			{
 				break;
 			}
 		}
+		DrainEncoder(branch);
 	}
 
-	void FlushEncoder(Branch& branch)
+	void Flush(Branch& branch, const FrameProcessor& frameProcessor)
 	{
-		auto sendResult = branch.encoder.TrySend(Frame::Null());
-		if (!sendResult)
-		{
-			throw Exception(sendResult.error());
-		}
-
-		DrainEncoder(branch);
+		SendPacket(Packet::Null(), branch, frameProcessor);
+		SendFrame(Frame::Null(), branch);
 	}
 
 	Muxer& m_muxer;
 	Demuxer& m_demuxer;
-	Branch m_audio;
 	Branch m_video;
+	Branch m_audio;
+	std::uint64_t m_packetsWritten = 0;
 };
 
 } // namespace mm_pipeline
