@@ -45,6 +45,7 @@ public:
 
 		std::int64_t videoFrameCounter = 0;
 		std::int64_t audioPtsSamples = 0;
+		m_packetsWritten = 0;
 
 		const FrameProcessor videoFrameProcessor = [&videoFrameCounter](Frame& frame) {
 			frame->pts = videoFrameCounter++;
@@ -106,6 +107,8 @@ public:
 		m_audio.encoder.RequestStop();
 	}
 
+	[[nodiscard]] std::uint64_t GetPacketsWritten() const noexcept { return m_packetsWritten; }
+
 private:
 	using FrameProcessor = std::function<void(Frame& frame)>;
 
@@ -164,6 +167,7 @@ private:
 			}
 
 			m_muxer.WritePacket(branch.track, *pkt, branch.encoder.GetStreamTimeBase().ToAV());
+			++m_packetsWritten;
 			progress = true;
 		}
 	}
@@ -368,6 +372,8 @@ private:
 	Branch m_audio;
 
 	bool m_demuxEof = false;
+
+	std::uint64_t m_packetsWritten = 0;
 };
 
 } // namespace mm_pipeline
