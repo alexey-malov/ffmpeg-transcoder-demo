@@ -26,6 +26,7 @@ import mm_pipeline.error;
 import mm_pipeline.async_encoder;
 import mm_pipeline.async_decoder;
 import mm_pipeline.async_transcoder;
+import mm_pipeline.pipeline_notifier;
 import ffmpeg.dictionary;
 import ffmpeg.packet;
 import ffmpeg.frame;
@@ -232,15 +233,17 @@ int main(int argc, char* argv[])
 
 		av_log_set_level(AV_LOG_ERROR);
 
-		mm_pipeline::AsyncDecoder asyncAudioDecoder{ std::move(audioDec), 10, 10 };
-		mm_pipeline::AsyncEncoder asyncAudioEncoder{ std::move(audioEnc), 10, 10 };
-		mm_pipeline::AsyncEncoder asyncVideoEncoder{ std::move(videoEnc), 20, 4 };
-		mm_pipeline::AsyncDecoder asyncVideoDecoder{ std::move(videoDec), 4, 20 };
+		mm_pipeline::PipelineNotifier notifier;
+		mm_pipeline::AsyncDecoder asyncAudioDecoder{ std::move(audioDec), 10, 10, notifier };
+		mm_pipeline::AsyncEncoder asyncAudioEncoder{ std::move(audioEnc), 10, 10, notifier };
+		mm_pipeline::AsyncDecoder asyncVideoDecoder{ std::move(videoDec), 12, 16, notifier };
+		mm_pipeline::AsyncEncoder asyncVideoEncoder{ std::move(videoEnc), 32, 4, notifier };
 
 		mm_pipeline::AsyncTranscoder asyncTranscoder{
 			muxer, demuxer,
 			{ asyncVideoDecoder, asyncVideoEncoder, indices.video, videoTrack },
-			{ asyncAudioDecoder, asyncAudioEncoder, indices.audio, audioTrack }
+			{ asyncAudioDecoder, asyncAudioEncoder, indices.audio, audioTrack },
+			notifier
 		};
 
 		using namespace std::chrono;

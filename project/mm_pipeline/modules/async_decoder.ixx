@@ -6,6 +6,7 @@ export module mm_pipeline.async_decoder;
 
 import std;
 import mm_pipeline.decoder;
+import mm_pipeline.pipeline_notifier;
 import ffmpeg.frame;
 import ffmpeg.packet;
 import ffmpeg.codec;
@@ -60,9 +61,11 @@ public:
 		std::uint64_t numItems = 0;
 	};
 
-	AsyncDecoder(Decoder decoder, size_t inputCapacity, size_t outputCapacity)
+	AsyncDecoder(Decoder decoder, size_t inputCapacity, size_t outputCapacity,
+		PipelineNotifier& pipelineNotifier)
 		: m_inputCapacity{ inputCapacity }
 		, m_outputCapacity{ outputCapacity }
+		, m_pipelineNotifier{ pipelineNotifier }
 		, m_decoder{ std::move(decoder) }
 	{
 		if (inputCapacity == 0)
@@ -397,6 +400,7 @@ private:
 		m_outputQueue.push_back(std::move(frame));
 		lock.unlock();
 		m_outputQueueHasFrames.notify_one();
+		m_pipelineNotifier.Notify();
 
 		UpdateStats(m_outputQueueStats, waitDuration);
 	}
@@ -424,6 +428,7 @@ private:
 		m_workerInputQueue.swap(m_inputQueue);
 		lock.unlock();
 		m_inputQueueHasFreeSpace.notify_one();
+		m_pipelineNotifier.Notify();
 
 		UpdateStats(m_inputQueueStats, m_workerInputQueue.size(), waitDuration);
 
@@ -443,11 +448,12 @@ private:
 	{
 		stats.waitDuration.fetch_add(waitDuration.count(), std::memory_order_relaxed);
 		stats.numLockAcquisitions.fetch_add(1, std::memory_order_relaxed);
-
 	}
 
 	size_t m_inputCapacity;
 	size_t m_outputCapacity;
+
+	PipelineNotifier& m_pipelineNotifier;
 
 	// This flag is set to true when CloseInput() is called.
 	// It is used to prevent pushing new packets after closing input.

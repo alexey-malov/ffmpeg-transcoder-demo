@@ -6,6 +6,7 @@ export module mm_pipeline.async_encoder;
 
 import std;
 import mm_pipeline.encoder;
+import mm_pipeline.pipeline_notifier;
 import ffmpeg.frame;
 import ffmpeg.packet;
 import ffmpeg.codec;
@@ -60,9 +61,11 @@ public:
 		size_t numUpdates = 0;
 		std::uint64_t numItems = 0;
 	};
-	AsyncEncoder(Encoder encoder, size_t inputCapacity, size_t outputCapacity)
+	AsyncEncoder(Encoder encoder, size_t inputCapacity, size_t outputCapacity,
+		PipelineNotifier& pipelineNotifier)
 		: m_inputCapacity{ inputCapacity }
 		, m_outputCapacity{ outputCapacity }
+		, m_pipelineNotifier{pipelineNotifier}
 		, m_encoder{ std::move(encoder) }
 	{
 		if (inputCapacity == 0)
@@ -388,6 +391,7 @@ private:
 		m_outputQueue.push_back(std::move(pkt));
 		lock.unlock();
 		m_outputQueueHasPackets.notify_one();
+		m_pipelineNotifier.Notify();
 	}
 
 	Frame GetFrameFromInputQueue(std::stop_token stopToken)
@@ -414,6 +418,8 @@ private:
 		lock.unlock();
 		m_inputQueueHasFreeSpace.notify_one();
 
+		m_pipelineNotifier.Notify();
+
 		UpdateStats(m_inputQueueStats, m_workerInputQueue.size(), waitDuration);
 
 		assert(!m_workerInputQueue.empty());
@@ -437,6 +443,7 @@ private:
 
 	size_t m_inputCapacity;
 	size_t m_outputCapacity;
+	PipelineNotifier& m_pipelineNotifier;
 
 	// This flag is set to true when CloseInput() is called. It is used to prevent pushing new frames after closing input.
 	bool m_inputClosed = false;

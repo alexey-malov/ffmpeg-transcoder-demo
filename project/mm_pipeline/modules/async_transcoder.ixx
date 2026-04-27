@@ -5,6 +5,7 @@ import mm_pipeline.encoder;
 import mm_pipeline.decoder;
 import mm_pipeline.async_encoder;
 import mm_pipeline.async_decoder;
+import mm_pipeline.pipeline_notifier;
 import mm_pipeline.muxer;
 import mm_pipeline.demuxer;
 import ffmpeg.packet;
@@ -28,11 +29,13 @@ public:
 	};
 
 	AsyncTranscoder(Muxer& muxer, Demuxer& demuxer,
-		const BranchConfig& video, const BranchConfig& audio)
+		const BranchConfig& video, const BranchConfig& audio,
+		mm_pipeline::PipelineNotifier& pipelineNotifier)
 		: m_muxer{ muxer }
 		, m_demuxer{ demuxer }
 		, m_video{ video.decoder, video.encoder, video.streamIndex, video.track }
 		, m_audio{ audio.decoder, audio.encoder, audio.streamIndex, audio.track }
+		, m_pipelineNotifier{ pipelineNotifier }
 	{
 	}
 
@@ -61,6 +64,8 @@ public:
 		{
 			while (!AllDone())
 			{
+				auto epoch = m_pipelineNotifier.epoch.load(std::memory_order_relaxed);
+
 				bool progress = false;
 
 				progress |= DrainEncoder(m_video);
@@ -73,7 +78,8 @@ public:
 
 				if (!progress)
 				{
-					std::this_thread::yield();
+					m_pipelineNotifier.Wait(epoch);
+					//std::this_thread::yield();
 				}
 			}
 
@@ -371,6 +377,8 @@ private:
 
 	Branch m_video;
 	Branch m_audio;
+
+	mm_pipeline::PipelineNotifier& m_pipelineNotifier;
 
 	bool m_demuxEof = false;
 
