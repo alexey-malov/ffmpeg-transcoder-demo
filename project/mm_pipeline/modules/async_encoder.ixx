@@ -134,53 +134,25 @@ public:
 		}
 	}
 
-	void Push(Frame&& frame)
-	{
-		if (m_inputClosed)
-		{
-			throw std::logic_error("Cannot push frames after input is closed");
-		}
-		if (!frame)
-		{
-			throw std::invalid_argument("Cannot push an empty frame. To Close stream use CloseInput method");
-		}
-
-		std::unique_lock lock{ m_inputQueueMutex };
-		m_inputQueueHasFreeSpace.wait(lock,
-			[this] {
-				return (m_state.load(std::memory_order::acquire) != State::Running)
-					|| (m_inputQueue.size() < m_inputCapacity);
-			});
-
-		if (m_state.load(std::memory_order::acquire) != State::Running)
-		{
-			throw std::runtime_error("Cannot push frames when AsyncEncoder is not running");
-		}
-
-		m_inputQueue.push_back(std::move(frame));
-		lock.unlock();
-		m_inputQueueHasFrames.notify_one();
-	}
-
 	// On Ok, the item is consumed.
 	// On Full, Stopped, or Failed, the item is not consumed and remains valid.
 	TryPushResult TryPush(Frame&& frame)
 	{
-		if (!frame)
+		if (!frame) [[unlikely]]
 			throw std::invalid_argument("Empty frame");
 
 		switch (m_state.load(std::memory_order::acquire))
 		{
 		case State::NotStarted:
 		case State::Finished:
-			throw std::logic_error("AsyncEncoder is not running");
+			[[unlikely]] throw std::logic_error("AsyncEncoder is not running");
 		case State::Stopped:
 			return TryPushResult::Stopped;
 		case State::Failed:
 			return TryPushResult::Failed;
 		}
 
-		if (m_inputClosed)
+		if (m_inputClosed) [[unlikely]]
 		{
 			throw std::logic_error("Input is closed");
 		}
@@ -203,7 +175,7 @@ public:
 	// The worker will flush the encoder and finish after processing all queued frames.
 	void CloseInput()
 	{
-		if (m_inputClosed)
+		if (m_inputClosed) [[unlikely]]
 		{
 			throw std::logic_error("Input is already closed");
 		}
@@ -220,43 +192,23 @@ public:
 		m_inputQueueHasFrames.notify_one();
 	}
 
-	// Pop a packet from the output queue. Blocks if no packets are available.
-	// If input is closed and all frames have been processed,
-	// always returns an empty packet to signal end of stream.
-	Packet Pop()
-	{
-		std::unique_lock lock{ m_outputQueueMutex };
-		m_outputQueueHasPackets.wait(lock, [this] {
-			return m_outputClosed || !m_outputQueue.empty();
-		});
-
-		if (!m_outputQueue.empty())
-		{
-			Packet pkt = std::move(m_outputQueue.front());
-			m_outputQueue.pop_front();
-			lock.unlock();
-			m_outputQueueHasFreeSpace.notify_one();
-			return pkt;
-		}
-		if (m_state.load(std::memory_order_acquire) == State::Finished)
-			return Packet::Null(); // EOF
-
-		RethrowIfFailed();
-
-		throw std::logic_error("Unknown state");
-	}
-
 	std::expected<Packet, TryPopError> TryPop()
 	{
+		if (!m_outputQueueBuffer.empty())
+		{
+			Packet pkt = std::move(m_outputQueueBuffer.front());
+			m_outputQueueBuffer.pop_front();
+			return pkt;
+		}
+
 		std::unique_lock lock{ m_outputQueueMutex };
 
 		if (!m_outputQueue.empty())
 		{
-			Packet pkt = std::move(m_outputQueue.front());
-			m_outputQueue.pop_front();
+			m_outputQueueBuffer.swap(m_outputQueue);
 			lock.unlock();
 			m_outputQueueHasFreeSpace.notify_one();
-			return pkt;
+			return TryPop();
 		}
 
 		if (!m_outputClosed)
@@ -343,16 +295,8 @@ private:
 
 	void EncodeFrame(const Frame& frame, const std::stop_token& stopToken)
 	{
-		while (true)
+		while (m_encoder.Send(frame) == SendResult::NeedReceive)
 		{
-			auto sendResult = m_encoder.TrySend(frame);
-			if (!sendResult)
-			{
-				throw std::runtime_error(std::format("Encoder TrySend error: {}, code: {}",
-					sendResult.error().where, sendResult.error().code));
-			}
-			if (*sendResult == SendResult::Accepted || *sendResult == SendResult::Flushed)
-				break;
 			DrainEncoder(stopToken);
 		}
 		// After sending a frame, we should try to receive packets until the encoder
@@ -362,22 +306,11 @@ private:
 
 	void DrainEncoder(const std::stop_token& stopToken)
 	{
-		while (true)
+		Packet pkt;
+		while (m_encoder.Receive(pkt) == ReceiveResult::Produced)
 		{
-			Packet pkt;
-			auto recvResult = m_encoder.TryReceive(pkt);
-			if (!recvResult)
-			{
-				throw std::runtime_error(std::format("Encoder drain TryReceive error: {}", recvResult.error().where));
-			}
-			if (*recvResult == ReceiveResult::Produced)
-			{
-				SendPacketToOutputQueue(std::move(pkt), stopToken);
-			}
-			else if (*recvResult == ReceiveResult::EndOfStream || *recvResult == ReceiveResult::NeedSend)
-			{
-				break;
-			}
+			SendPacketToOutputQueue(std::move(pkt), stopToken);
+			pkt = {};
 		}
 	}
 
@@ -389,7 +322,7 @@ private:
 				return stopToken.stop_requested() || (m_outputQueue.size() < m_outputCapacity);
 			});
 
-		if (stopToken.stop_requested())
+		if (stopToken.stop_requested()) [[unlikely]]
 		{
 			throw CancelException{};
 		}
@@ -400,6 +333,13 @@ private:
 
 	Frame GetFrameFromInputQueue(std::stop_token stopToken)
 	{
+		if (!m_workerInputQueue.empty())
+		{
+			Frame frame = std::move(m_workerInputQueue.front());
+			m_workerInputQueue.pop_front();
+			return frame;
+		}
+
 		std::unique_lock lock{ m_inputQueueMutex };
 		m_inputQueueHasFrames.wait(lock, [this, stopToken] {
 			return stopToken.stop_requested() || !m_inputQueue.empty();
@@ -408,11 +348,12 @@ private:
 		{
 			throw CancelException{};
 		}
-		Frame frame = std::move(m_inputQueue.front());
-		m_inputQueue.pop_front();
+		m_workerInputQueue.swap(m_inputQueue);
 		lock.unlock();
 		m_inputQueueHasFreeSpace.notify_one();
-		return frame;
+
+		assert(!m_workerInputQueue.empty());
+		return GetFrameFromInputQueue(stopToken);
 	}
 
 	size_t m_inputCapacity;
@@ -424,6 +365,7 @@ private:
 	// The encoder is accessed only by the worker thread, so no need for synchronization on it.
 	Encoder m_encoder;
 
+	std::deque<Frame> m_workerInputQueue;
 	std::mutex m_inputQueueMutex;
 	// These variables are protected by m_inputQueueMutex:
 	// This queue may contain m_inputCapacity non-empty frames
@@ -433,6 +375,7 @@ private:
 	std::condition_variable m_inputQueueHasFreeSpace;
 	// -------------------------------------
 
+	std::deque<Packet> m_outputQueueBuffer;
 	std::mutex m_outputQueueMutex;
 	// These variables are protected by m_outputQueueMutex:
 	// This queue contains only non-empty packets produced by the encoder.

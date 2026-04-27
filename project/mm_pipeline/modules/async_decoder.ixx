@@ -132,41 +132,14 @@ public:
 		}
 	}
 
-	void Push(Packet&& pkt)
-	{
-		if (m_inputClosed)
-		{
-			throw std::logic_error("Cannot push packets after input is closed");
-		}
-		if (!pkt)
-		{
-			throw std::invalid_argument("Cannot push an empty packet. To close stream use CloseInput method");
-		}
-
-		std::unique_lock lock{ m_inputQueueMutex };
-		m_inputQueueHasFreeSpace.wait(lock, [this] {
-			return (m_state.load(std::memory_order::acquire) != State::Running)
-				|| (m_inputQueue.size() < m_inputCapacity);
-		});
-
-		if (m_state.load(std::memory_order::acquire) != State::Running)
-		{
-			throw std::runtime_error("Cannot push packets when AsyncDecoder is not running");
-		}
-
-		m_inputQueue.push_back(std::move(pkt));
-		lock.unlock();
-		m_inputQueueHasPackets.notify_one();
-	}
-
 	TryPushResult TryPush(Packet&& pkt)
 	{
-		if (!pkt)
+		if (!pkt) [[unlikely]]
 		{
 			throw std::invalid_argument("Cannot push an empty packet. To close stream use CloseInput method");
 		}
 
-		if (m_inputClosed)
+		if (m_inputClosed) [[unlikely]]
 		{
 			throw std::logic_error("Cannot push packets after input is closed");
 		}
@@ -175,7 +148,7 @@ public:
 		{
 		case State::NotStarted:
 		case State::Finished:
-			throw std::logic_error("Cannot push packets when AsyncDecoder is not running");
+			[[unlikely]] throw std::logic_error("Cannot push packets when AsyncDecoder is not running");
 
 		case State::Stopped:
 			return TryPushResult::Stopped;
@@ -205,11 +178,11 @@ public:
 	// The worker will flush the decoder and finish after processing all queued packets.
 	void CloseInput()
 	{
-		if (m_inputClosed)
+		if (m_inputClosed) [[unlikely]]
 		{
 			throw std::logic_error("Input is already closed");
 		}
-		if (m_state.load(std::memory_order_acquire) != State::Running)
+		if (m_state.load(std::memory_order_acquire) != State::Running) [[unlikely]]
 		{
 			throw std::runtime_error("Cannot close input when AsyncDecoder is not running");
 		}
@@ -223,46 +196,22 @@ public:
 		m_inputQueueHasPackets.notify_one();
 	}
 
-	// Pop a frame from the output queue. Blocks if no frames are available.
-	// When the decoder finishes and the output queue is drained,
-	// returns an empty frame to signal end of stream.
-	// Subsequent calls after EOF also return an empty frame.
-	Frame Pop()
-	{
-		std::unique_lock lock{ m_outputQueueMutex };
-		m_outputQueueHasFrames.wait(lock, [this] {
-			return m_outputClosed || !m_outputQueue.empty();
-		});
-
-		if (!m_outputQueue.empty())
-		{
-			Frame frame = std::move(m_outputQueue.front());
-			m_outputQueue.pop_front();
-			lock.unlock();
-			m_outputQueueHasFreeSpace.notify_one();
-			return frame;
-		}
-
-		if (m_state.load(std::memory_order_acquire) == State::Finished)
-		{
-			return Frame::Null(); // EOF
-		}
-
-		RethrowIfFailed();
-		throw std::logic_error("Unknown state");
-	}
-
 	std::expected<Frame, TryPopError> TryPop()
 	{
+		if (!m_outputQueueBuffer.empty())
+		{
+			Frame frame = std::move(m_outputQueueBuffer.front());
+			m_outputQueueBuffer.pop_front();
+			return frame;
+		}
 		std::unique_lock lock{ m_outputQueueMutex };
 
 		if (!m_outputQueue.empty())
 		{
-			Frame frame = std::move(m_outputQueue.front());
-			m_outputQueue.pop_front();
+			m_outputQueueBuffer.swap(m_outputQueue);
 			lock.unlock();
 			m_outputQueueHasFreeSpace.notify_one();
-			return frame;
+			return TryPop();
 		}
 
 		if (!m_outputClosed)
@@ -351,19 +300,8 @@ private:
 
 	void DecodePacket(const Packet& pkt, const std::stop_token& stopToken)
 	{
-		while (true)
+		while (m_decoder.Send(pkt) == SendResult::NeedReceive)
 		{
-			auto sendResult = m_decoder.TrySend(pkt);
-			if (!sendResult)
-			{
-				throw std::runtime_error(std::format("Decoder TrySend error: {}", sendResult.error().where));
-			}
-
-			if (*sendResult == SendResult::Accepted || *sendResult == SendResult::Flushed)
-			{
-				break;
-			}
-
 			DrainDecoder(stopToken);
 		}
 
@@ -374,23 +312,11 @@ private:
 
 	void DrainDecoder(const std::stop_token& stopToken)
 	{
-		while (true)
+		Frame frame;
+		while (m_decoder.Receive(frame) == ReceiveResult::Produced)
 		{
-			Frame frame;
-			auto recvResult = m_decoder.TryReceive(frame);
-			if (!recvResult)
-			{
-				throw std::runtime_error(std::format("Decoder drain TryReceive error: {}", recvResult.error().where));
-			}
-
-			if (*recvResult == ReceiveResult::Produced)
-			{
-				SendFrameToOutputQueue(std::move(frame), stopToken);
-			}
-			else if (*recvResult == ReceiveResult::EndOfStream || *recvResult == ReceiveResult::NeedSend)
-			{
-				break;
-			}
+			SendFrameToOutputQueue(std::move(frame), stopToken);
+			frame = {};
 		}
 	}
 
@@ -413,6 +339,12 @@ private:
 
 	Packet GetPacketFromInputQueue(std::stop_token stopToken)
 	{
+		if (!m_workerInputQueue.empty())
+		{
+			Packet pkt = std::move(m_workerInputQueue.front());
+			m_workerInputQueue.pop_front();
+			return pkt;
+		}
 		std::unique_lock lock{ m_inputQueueMutex };
 		m_inputQueueHasPackets.wait(lock, [this, stopToken] {
 			return stopToken.stop_requested() || !m_inputQueue.empty();
@@ -422,12 +354,12 @@ private:
 		{
 			throw CancelException{};
 		}
-
-		Packet pkt = std::move(m_inputQueue.front());
-		m_inputQueue.pop_front();
+		m_workerInputQueue.swap(m_inputQueue);
 		lock.unlock();
 		m_inputQueueHasFreeSpace.notify_one();
-		return pkt;
+
+		assert(!m_workerInputQueue.empty());
+		return GetPacketFromInputQueue(stopToken);
 	}
 
 private:
@@ -441,6 +373,7 @@ private:
 	// The decoder is accessed only by the worker thread.
 	Decoder m_decoder;
 
+	std::deque<Packet> m_workerInputQueue;
 	std::mutex m_inputQueueMutex;
 	// This queue may contain m_inputCapacity non-empty packets
 	// and at most 1 empty packet (as a signal to flush and finish).
@@ -448,6 +381,7 @@ private:
 	std::condition_variable m_inputQueueHasPackets;
 	std::condition_variable m_inputQueueHasFreeSpace;
 
+	std::deque<Frame> m_outputQueueBuffer;
 	std::mutex m_outputQueueMutex;
 	// This queue contains only non-empty frames produced by the decoder.
 	// Pop() may additionally return an empty frame as an EOF marker
