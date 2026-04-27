@@ -48,6 +48,18 @@ public:
 		Failed
 	};
 
+	using Clock = std::chrono::high_resolution_clock;
+	using Duration = Clock::duration;
+
+	struct Stats
+	{
+		size_t numLockAcquisitions = 0;
+		Duration waitDuration = {};
+		size_t maxQueueSize = 0;
+		size_t numUpdates = 0;
+		std::uint64_t numItems = 0;
+	};
+
 	AsyncDecoder(Decoder decoder, size_t inputCapacity, size_t outputCapacity)
 		: m_inputCapacity{ inputCapacity }
 		, m_outputCapacity{ outputCapacity }
@@ -70,6 +82,16 @@ public:
 	{
 		RequestStop();
 		Join();
+	}
+
+	Stats GetInputQueueStats() const
+	{
+		return GetStats(m_inputQueueStats);
+	}
+
+	Stats GetOutputQueueStats() const
+	{
+		return GetStats(m_outputQueueStats);
 	}
 
 	void Start()
@@ -160,16 +182,23 @@ public:
 			break;
 		}
 
+		const auto waitStart = Clock::now();
 		std::unique_lock lock{ m_inputQueueMutex };
+		const auto waitDuration = Clock::now() - waitStart;
 
 		if (m_inputQueue.size() >= m_inputCapacity)
 		{
+			lock.unlock();
+			UpdateStats(m_inputQueueStats, waitDuration);
+
 			return TryPushResult::Full;
 		}
 
 		m_inputQueue.push_back(std::move(pkt));
 		lock.unlock();
 		m_inputQueueHasPackets.notify_one();
+
+		UpdateStats(m_inputQueueStats, waitDuration);
 
 		return TryPushResult::Ok;
 	}
@@ -204,13 +233,19 @@ public:
 			m_outputQueueBuffer.pop_front();
 			return frame;
 		}
+
+		const auto waitStart = Clock::now();
 		std::unique_lock lock{ m_outputQueueMutex };
+		const auto waitDuration = Clock::now() - waitStart;
 
 		if (!m_outputQueue.empty())
 		{
 			m_outputQueueBuffer.swap(m_outputQueue);
 			lock.unlock();
 			m_outputQueueHasFreeSpace.notify_one();
+
+			UpdateStats(m_outputQueueStats, m_outputQueueBuffer.size(), waitDuration);
+
 			return TryPop();
 		}
 
@@ -252,6 +287,31 @@ private:
 
 	using SendResult = ffmpeg::SendResult;
 	using ReceiveResult = ffmpeg::ReceiveResult;
+
+	struct StatsImpl
+	{
+		std::atomic<size_t> numLockAcquisitions = 0;
+		std::atomic<Duration::rep> waitDuration = {};
+		size_t maxQueueSize = 0;
+		size_t numUpdates = 0;
+		std::uint64_t numItems = 0;
+	};
+
+	Stats GetStats(const StatsImpl& stats) const
+	{
+		if (m_state != State::Stopped && m_state != State::Failed && m_state != State::Finished)
+		{
+			throw std::logic_error("You can't get stats now");
+		}
+
+		return Stats{
+			.numLockAcquisitions = stats.numLockAcquisitions.load(std::memory_order_relaxed),
+			.waitDuration = Duration{ stats.waitDuration.load(std::memory_order_relaxed) },
+			.maxQueueSize = stats.maxQueueSize,
+			.numUpdates = stats.numUpdates,
+			.numItems = stats.numItems,
+		};
+	}
 
 	void WorkerThreadFunc(std::stop_token stopToken)
 	{
@@ -322,10 +382,12 @@ private:
 
 	void SendFrameToOutputQueue(Frame&& frame, const std::stop_token& stopToken)
 	{
+		const auto waitStart = Clock::now();
 		std::unique_lock lock{ m_outputQueueMutex };
 		m_outputQueueHasFreeSpace.wait(lock, [this, &stopToken] {
 			return stopToken.stop_requested() || (m_outputQueue.size() < m_outputCapacity);
 		});
+		const auto waitDuration = Clock::now() - waitStart;
 
 		if (stopToken.stop_requested())
 		{
@@ -335,6 +397,8 @@ private:
 		m_outputQueue.push_back(std::move(frame));
 		lock.unlock();
 		m_outputQueueHasFrames.notify_one();
+
+		UpdateStats(m_outputQueueStats, waitDuration);
 	}
 
 	Packet GetPacketFromInputQueue(std::stop_token stopToken)
@@ -345,10 +409,13 @@ private:
 			m_workerInputQueue.pop_front();
 			return pkt;
 		}
+
+		const auto waitStart = Clock::now();
 		std::unique_lock lock{ m_inputQueueMutex };
 		m_inputQueueHasPackets.wait(lock, [this, stopToken] {
 			return stopToken.stop_requested() || !m_inputQueue.empty();
 		});
+		const auto waitDuration = Clock::now() - waitStart;
 
 		if (stopToken.stop_requested())
 		{
@@ -358,11 +425,27 @@ private:
 		lock.unlock();
 		m_inputQueueHasFreeSpace.notify_one();
 
+		UpdateStats(m_inputQueueStats, m_workerInputQueue.size(), waitDuration);
+
 		assert(!m_workerInputQueue.empty());
 		return GetPacketFromInputQueue(stopToken);
 	}
 
-private:
+	void UpdateStats(StatsImpl& stats, size_t queueSize, Duration waitDuration)
+	{
+		stats.maxQueueSize = std::max(stats.maxQueueSize, queueSize);
+		stats.numItems += queueSize;
+		++stats.numUpdates;
+		UpdateStats(stats, waitDuration);
+	}
+
+	void UpdateStats(StatsImpl& stats, Duration waitDuration)
+	{
+		stats.waitDuration.fetch_add(waitDuration.count(), std::memory_order_relaxed);
+		stats.numLockAcquisitions.fetch_add(1, std::memory_order_relaxed);
+
+	}
+
 	size_t m_inputCapacity;
 	size_t m_outputCapacity;
 
@@ -373,6 +456,7 @@ private:
 	// The decoder is accessed only by the worker thread.
 	Decoder m_decoder;
 
+	StatsImpl m_inputQueueStats;
 	std::deque<Packet> m_workerInputQueue;
 	std::mutex m_inputQueueMutex;
 	// This queue may contain m_inputCapacity non-empty packets
@@ -381,6 +465,7 @@ private:
 	std::condition_variable m_inputQueueHasPackets;
 	std::condition_variable m_inputQueueHasFreeSpace;
 
+	StatsImpl m_outputQueueStats;
 	std::deque<Frame> m_outputQueueBuffer;
 	std::mutex m_outputQueueMutex;
 	// This queue contains only non-empty frames produced by the decoder.

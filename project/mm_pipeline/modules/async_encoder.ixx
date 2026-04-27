@@ -49,6 +49,17 @@ public:
 		Failed
 	};
 
+	using Clock = std::chrono::high_resolution_clock;
+	using Duration = Clock::duration;
+
+	struct Stats
+	{
+		size_t numLockAcquisitions = 0;
+		Duration waitDuration = {};
+		size_t maxQueueSize = 0;
+		size_t numUpdates = 0;
+		std::uint64_t numItems = 0;
+	};
 	AsyncEncoder(Encoder encoder, size_t inputCapacity, size_t outputCapacity)
 		: m_inputCapacity{ inputCapacity }
 		, m_outputCapacity{ outputCapacity }
@@ -79,6 +90,15 @@ public:
 		return m_encoder.GetStreamTimeBase();
 	}
 
+	Stats GetInputQueueStats() const
+	{
+		return GetStats(m_inputQueueStats);
+	}
+
+	Stats GetOutputQueueStats() const
+	{
+		return GetStats(m_outputQueueStats);
+	}
 	void Start()
 	{
 		State expected = State::NotStarted;
@@ -157,16 +177,23 @@ public:
 			throw std::logic_error("Input is closed");
 		}
 
+		const auto waitStart = Clock::now();
 		std::unique_lock lock{ m_inputQueueMutex };
+		const auto waitDuration = Clock::now() - waitStart;
 
 		if (m_inputQueue.size() >= m_inputCapacity)
 		{
+			lock.unlock();
+			UpdateStats(m_inputQueueStats, waitDuration);
+
 			return TryPushResult::Full;
 		}
 
 		m_inputQueue.push_back(std::move(frame));
 		lock.unlock();
 		m_inputQueueHasFrames.notify_one();
+
+		UpdateStats(m_inputQueueStats, waitDuration);
 
 		return TryPushResult::Ok;
 	}
@@ -201,13 +228,18 @@ public:
 			return pkt;
 		}
 
+		const auto waitStart = Clock::now();
 		std::unique_lock lock{ m_outputQueueMutex };
+		const auto waitDuration = Clock::now() - waitStart;
 
 		if (!m_outputQueue.empty())
 		{
 			m_outputQueueBuffer.swap(m_outputQueue);
 			lock.unlock();
 			m_outputQueueHasFreeSpace.notify_one();
+
+			UpdateStats(m_outputQueueStats, m_outputQueueBuffer.size(), waitDuration);
+
 			return TryPop();
 		}
 
@@ -247,6 +279,31 @@ private:
 
 	using SendResult = ffmpeg::SendResult;
 	using ReceiveResult = ffmpeg::ReceiveResult;
+
+	struct StatsImpl
+	{
+		std::atomic<size_t> numLockAcquisitions = 0;
+		std::atomic<Duration::rep> waitDuration = {};
+		size_t maxQueueSize = 0;
+		size_t numUpdates = 0;
+		std::uint64_t numItems = 0;
+	};
+
+	Stats GetStats(const StatsImpl& stats) const
+	{
+		if (m_state != State::Stopped && m_state != State::Failed && m_state != State::Finished)
+		{
+			throw std::logic_error("You can't get stats now");
+		}
+
+		return Stats{
+			.numLockAcquisitions = stats.numLockAcquisitions.load(std::memory_order_relaxed),
+			.waitDuration = Duration{ stats.waitDuration.load(std::memory_order_relaxed) },
+			.maxQueueSize = stats.maxQueueSize,
+			.numUpdates = stats.numUpdates,
+			.numItems = stats.numItems,
+		};
+	}
 
 	void WorkerThreadFunc(std::stop_token stopToken)
 	{
@@ -316,11 +373,13 @@ private:
 
 	void SendPacketToOutputQueue(Packet&& pkt, const std::stop_token& stopToken)
 	{
+		const auto waitStart = Clock::now();
 		std::unique_lock lock{ m_outputQueueMutex };
 		m_outputQueueHasFreeSpace.wait(lock,
 			[this, &stopToken] {
 				return stopToken.stop_requested() || (m_outputQueue.size() < m_outputCapacity);
 			});
+		const auto waitDuration = Clock::now() - waitStart;
 
 		if (stopToken.stop_requested()) [[unlikely]]
 		{
@@ -340,10 +399,13 @@ private:
 			return frame;
 		}
 
+		const auto waitStart = Clock::now();
 		std::unique_lock lock{ m_inputQueueMutex };
 		m_inputQueueHasFrames.wait(lock, [this, stopToken] {
 			return stopToken.stop_requested() || !m_inputQueue.empty();
 		});
+		const auto waitDuration = Clock::now() - waitStart;
+
 		if (stopToken.stop_requested())
 		{
 			throw CancelException{};
@@ -352,8 +414,25 @@ private:
 		lock.unlock();
 		m_inputQueueHasFreeSpace.notify_one();
 
+		UpdateStats(m_inputQueueStats, m_workerInputQueue.size(), waitDuration);
+
 		assert(!m_workerInputQueue.empty());
 		return GetFrameFromInputQueue(stopToken);
+	}
+
+	void UpdateStats(StatsImpl& stats, size_t queueSize, Duration waitDuration)
+	{
+		stats.maxQueueSize = std::max(stats.maxQueueSize, queueSize);
+		stats.numItems += queueSize;
+		++stats.numUpdates;
+		UpdateStats(stats, waitDuration);
+	}
+
+	void UpdateStats(StatsImpl& stats, Duration waitDuration)
+	{
+		stats.waitDuration.fetch_add(waitDuration.count(), std::memory_order_relaxed);
+		stats.numLockAcquisitions.fetch_add(1, std::memory_order_relaxed);
+
 	}
 
 	size_t m_inputCapacity;
@@ -365,6 +444,7 @@ private:
 	// The encoder is accessed only by the worker thread, so no need for synchronization on it.
 	Encoder m_encoder;
 
+	StatsImpl m_inputQueueStats;
 	std::deque<Frame> m_workerInputQueue;
 	std::mutex m_inputQueueMutex;
 	// These variables are protected by m_inputQueueMutex:
@@ -375,6 +455,7 @@ private:
 	std::condition_variable m_inputQueueHasFreeSpace;
 	// -------------------------------------
 
+	StatsImpl m_outputQueueStats;
 	std::deque<Packet> m_outputQueueBuffer;
 	std::mutex m_outputQueueMutex;
 	// These variables are protected by m_outputQueueMutex:

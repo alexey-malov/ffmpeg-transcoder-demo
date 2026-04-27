@@ -232,10 +232,10 @@ int main(int argc, char* argv[])
 
 		av_log_set_level(AV_LOG_ERROR);
 
-		mm_pipeline::AsyncEncoder asyncAudioEncoder{ std::move(audioEnc), 2, 2 };
-		mm_pipeline::AsyncEncoder asyncVideoEncoder{ std::move(videoEnc), 2, 2 };
-		mm_pipeline::AsyncDecoder asyncAudioDecoder{ std::move(audioDec), 2, 2 };
-		mm_pipeline::AsyncDecoder asyncVideoDecoder{ std::move(videoDec), 2, 2 };
+		mm_pipeline::AsyncDecoder asyncAudioDecoder{ std::move(audioDec), 10, 10 };
+		mm_pipeline::AsyncEncoder asyncAudioEncoder{ std::move(audioEnc), 10, 10 };
+		mm_pipeline::AsyncEncoder asyncVideoEncoder{ std::move(videoEnc), 20, 4 };
+		mm_pipeline::AsyncDecoder asyncVideoDecoder{ std::move(videoDec), 4, 20 };
 
 		mm_pipeline::AsyncTranscoder asyncTranscoder{
 			muxer, demuxer,
@@ -251,6 +251,25 @@ int main(int argc, char* argv[])
 		asyncTranscoder.Run();
 
 		auto end = Clock::now();
+
+		auto printStats = [](const auto& stats, std::string_view name) {
+			std::cout << name
+					  << " stats:\n num locks: " << stats.numLockAcquisitions
+					  << "\n wait duration: " << duration<double>(stats.waitDuration)
+					  << "\n max size: " << stats.maxQueueSize
+					  << "\n avg size: " << static_cast<double>(stats.numItems) / stats.numUpdates
+					  << "\n";
+		};
+
+		printStats(asyncVideoDecoder.GetInputQueueStats(), "Video decoder input queue");
+		printStats(asyncVideoDecoder.GetOutputQueueStats(), "Video decoder output queue");
+		printStats(asyncVideoEncoder.GetInputQueueStats(), "Video encoder input queue");
+		printStats(asyncVideoEncoder.GetOutputQueueStats(), "Video encoder output queue");
+
+		printStats(asyncAudioDecoder.GetInputQueueStats(), "Audio decoder input queue");
+		printStats(asyncAudioDecoder.GetOutputQueueStats(), "Audio decoder output queue");
+		printStats(asyncAudioEncoder.GetInputQueueStats(), "Audio encoder input queue");
+		printStats(asyncAudioEncoder.GetOutputQueueStats(), "Audio encoder output queue");
 
 		std::cout << "Finished in " << duration<double>(end - start).count() << " s.\n";
 
