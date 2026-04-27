@@ -81,6 +81,7 @@ int main(int argc, char* argv[])
 		std::cerr << "Usage: " << argv[0] << " <input.mp4> <output.mp4>\n";
 		return 1;
 	}
+	av_log_set_level(AV_LOG_ERROR);
 
 	const char* inputPath = argv[1];
 	const char* outputPath = argv[2];
@@ -230,8 +231,6 @@ int main(int argc, char* argv[])
 		muxer.WriteHeader();
 
 		std::cout << "Muxer ready, starting transcode...\n";
-
-		av_log_set_level(AV_LOG_QUIET);
 
 		using namespace std::chrono;
 		using Clock = high_resolution_clock;
