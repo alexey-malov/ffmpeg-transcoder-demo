@@ -43,6 +43,7 @@ public:
 
 		const FrameProcessor processVideoFrame = [&videoFrameCounter](Frame& frame) {
 			frame->pts = videoFrameCounter++;
+			frame->pict_type = AV_PICTURE_TYPE_NONE;
 		};
 
 		const FrameProcessor processAudioFrame = [&audioPtsSamples](Frame& frame) {
