@@ -20,6 +20,7 @@ target_sources(mm_pipeline
     "modules/async_decoder.ixx"
     "modules/async_encoder.ixx"
     "modules/async_transcoder.ixx"
+    "modules/async_queue.ixx"
     "modules/demuxer.ixx"
     "modules/error.ixx"
     "modules/muxer.ixx"
