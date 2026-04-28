@@ -228,6 +228,12 @@ public:
 		return m_closed;
 	}
 
+	void NotifyAll() noexcept
+	{
+		m_cvNotEmpty.notify_all();
+		m_cvNotFull.notify_all();
+	}
+
 private:
 	template <class U>
 	TryPushResult TryPushImpl(U&& value)
