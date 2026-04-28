@@ -52,22 +52,14 @@ public:
 	// Try API (non-blocking)
 	// =======================
 
-	TryPushResult TryPush(T value)
+	TryPushResult TryPush(const T& value)
 	{
-		std::unique_lock lock{ m_mutex };
+		return TryPushImpl(value);
+	}
 
-		if (m_closed)
-			return TryPushResult::Closed;
-
-		if (m_queue.size() >= m_capacity)
-			return TryPushResult::Full;
-
-		m_queue.push_back(std::move(value));
-
-		lock.unlock();
-		m_cvNotEmpty.notify_one();
-
-		return TryPushResult::Ok;
+	TryPushResult TryPush(T&& value)
+	{
+		return TryPushImpl(std::move(value));
 	}
 
 	std::expected<T, TryPopError> TryPop()
@@ -237,6 +229,25 @@ public:
 	}
 
 private:
+	template <class U>
+	TryPushResult TryPushImpl(U&& value)
+	{
+		std::unique_lock lock{ m_mutex };
+
+		if (m_closed)
+			return TryPushResult::Closed;
+
+		if (m_queue.size() >= m_capacity)
+			return TryPushResult::Full;
+
+		m_queue.emplace_back(std::forward<U>(value));
+
+		lock.unlock();
+		m_cvNotEmpty.notify_one();
+
+		return TryPushResult::Ok;
+	}
+
 	const size_t m_capacity;
 
 	mutable std::mutex m_mutex;
