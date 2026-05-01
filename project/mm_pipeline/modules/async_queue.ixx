@@ -225,6 +225,7 @@ public:
 
 	[[nodiscard]] bool IsClosed() const noexcept
 	{
+		std::lock_guard lock{ m_mutex };
 		return m_closed;
 	}
 
