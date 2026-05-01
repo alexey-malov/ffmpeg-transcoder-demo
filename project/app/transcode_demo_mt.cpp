@@ -23,9 +23,9 @@ import mm_pipeline.decoder;
 import mm_pipeline.encoder;
 import mm_pipeline.muxer;
 import mm_pipeline.error;
-import mm_pipeline.async_encoder2;
-import mm_pipeline.async_decoder2;
-import mm_pipeline.async_transcoder2;
+import mm_pipeline.async_encoder;
+import mm_pipeline.async_decoder;
+import mm_pipeline.async_transcoder;
 import mm_pipeline.pipeline_notifier;
 import ffmpeg.dictionary;
 import ffmpeg.packet;
@@ -235,12 +235,12 @@ int main(int argc, char* argv[])
 
 		mm_pipeline::PipelineNotifier notifier;
 
-		mm_pipeline::AsyncDecoder2 asyncAudioDecoder{ std::move(audioDec), 10, 10, notifier };
-		mm_pipeline::AsyncEncoder2 asyncAudioEncoder{ std::move(audioEnc), 10, 10, notifier };
-		mm_pipeline::AsyncDecoder2 asyncVideoDecoder{ std::move(videoDec), 12, 16, notifier };
-		mm_pipeline::AsyncEncoder2 asyncVideoEncoder{ std::move(videoEnc), 32, 4, notifier };
+		mm_pipeline::AsyncDecoder asyncAudioDecoder{ std::move(audioDec), 10, 10, notifier };
+		mm_pipeline::AsyncEncoder asyncAudioEncoder{ std::move(audioEnc), 10, 10, notifier };
+		mm_pipeline::AsyncDecoder asyncVideoDecoder{ std::move(videoDec), 12, 16, notifier };
+		mm_pipeline::AsyncEncoder asyncVideoEncoder{ std::move(videoEnc), 32, 4, notifier };
 
-		mm_pipeline::AsyncTranscoder2 asyncTranscoder{
+		mm_pipeline::AsyncTranscoder asyncTranscoder{
 			muxer, demuxer,
 			{ asyncVideoDecoder, asyncVideoEncoder, indices.video, videoTrack },
 			{ asyncAudioDecoder, asyncAudioEncoder, indices.audio, audioTrack },
@@ -255,27 +255,6 @@ int main(int argc, char* argv[])
 		asyncTranscoder.Run();
 
 		auto end = Clock::now();
-
-		#if 0
-		auto printStats = [](const auto& stats, std::string_view name) {
-			std::cout << name
-					  << " stats:\n num locks: " << stats.numLockAcquisitions
-					  << "\n wait duration: " << duration<double>(stats.waitDuration)
-					  << "\n max size: " << stats.maxQueueSize
-					  << "\n avg size: " << static_cast<double>(stats.numItems) / stats.numUpdates
-					  << "\n";
-		};
-
-		printStats(asyncVideoDecoder.GetInputQueueStats(), "Video decoder input queue");
-		printStats(asyncVideoDecoder.GetOutputQueueStats(), "Video decoder output queue");
-		printStats(asyncVideoEncoder.GetInputQueueStats(), "Video encoder input queue");
-		printStats(asyncVideoEncoder.GetOutputQueueStats(), "Video encoder output queue");
-
-		printStats(asyncAudioDecoder.GetInputQueueStats(), "Audio decoder input queue");
-		printStats(asyncAudioDecoder.GetOutputQueueStats(), "Audio decoder output queue");
-		printStats(asyncAudioEncoder.GetInputQueueStats(), "Audio encoder input queue");
-		printStats(asyncAudioEncoder.GetOutputQueueStats(), "Audio encoder output queue");
-		#endif
 
 		std::cout << "Finished in " << duration<double>(end - start).count() << " s.\n";
 

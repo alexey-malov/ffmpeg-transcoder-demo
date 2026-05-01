@@ -61,23 +61,23 @@ copy_runtime_dlls(transcode_demo
 )
 
 # multithreaded Transcode demo executable
-add_executable(transcode_demo_mt2)
+add_executable(transcode_demo_mt)
 
-target_compile_features(transcode_demo_mt2 PRIVATE cxx_std_23)
+target_compile_features(transcode_demo_mt PRIVATE cxx_std_23)
 
-target_sources(transcode_demo_mt2 PRIVATE
-  ${CMAKE_CURRENT_LIST_DIR}/transcode_demo_mt2.cpp
+target_sources(transcode_demo_mt PRIVATE
+  "transcode_demo_mt.cpp"
 )
 
 if(MSVC)
-  target_compile_options(transcode_demo_mt2 PRIVATE /W4 /WX)
+  target_compile_options(transcode_demo_mt PRIVATE /W4 /WX)
 else()
-  target_compile_options(transcode_demo_mt2 PRIVATE -Wall -Wextra -Wpedantic -Werror -Wconversion -Wshadow)
+  target_compile_options(transcode_demo_mt PRIVATE -Wall -Wextra -Wpedantic -Werror -Wconversion -Wshadow)
 endif()
 
-target_link_libraries(transcode_demo_mt2 PRIVATE My::mm_pipeline)
+target_link_libraries(transcode_demo_mt PRIVATE My::mm_pipeline)
 
-copy_runtime_dlls(transcode_demo_mt2
+copy_runtime_dlls(transcode_demo_mt
   FFmpeg::avutil
   FFmpeg::avcodec
   FFmpeg::avformat

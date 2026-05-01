@@ -1,10 +1,10 @@
-export module mm_pipeline.async_transcoder2;
+export module mm_pipeline.async_transcoder;
 
 import std;
 import mm_pipeline.encoder;
 import mm_pipeline.decoder;
-import mm_pipeline.async_encoder2;
-import mm_pipeline.async_decoder2;
+import mm_pipeline.async_encoder;
+import mm_pipeline.async_decoder;
 import mm_pipeline.pipeline_notifier;
 import mm_pipeline.muxer;
 import mm_pipeline.demuxer;
@@ -14,7 +14,7 @@ import ffmpeg.frame;
 namespace mm_pipeline
 {
 
-export class AsyncTranscoder2
+export class AsyncTranscoder
 {
 public:
 	using Frame = ffmpeg::Frame;
@@ -22,13 +22,13 @@ public:
 
 	struct BranchConfig
 	{
-		AsyncDecoder2& decoder;
-		AsyncEncoder2& encoder;
+		AsyncDecoder& decoder;
+		AsyncEncoder& encoder;
 		int streamIndex = -1;
 		Muxer::TrackId track;
 	};
 
-	AsyncTranscoder2(Muxer& muxer, Demuxer& demuxer,
+	AsyncTranscoder(Muxer& muxer, Demuxer& demuxer,
 		const BranchConfig& video, const BranchConfig& audio,
 		mm_pipeline::PipelineNotifier& pipelineNotifier)
 		: m_muxer{ muxer }
@@ -120,8 +120,8 @@ private:
 
 	struct Branch
 	{
-		AsyncDecoder2& decoder;
-		AsyncEncoder2& encoder;
+		AsyncDecoder& decoder;
+		AsyncEncoder& encoder;
 		int streamIndex = -1;
 		Muxer::TrackId track;
 
@@ -152,13 +152,13 @@ private:
 			{
 				switch (popResult.error())
 				{
-				case AsyncEncoder2::TryPopError::Empty:
+				case AsyncEncoder::TryPopError::Empty:
 					return progress;
 
-				case AsyncEncoder2::TryPopError::Stopped:
-					throw AsyncEncoder2::CancelException{};
+				case AsyncEncoder::TryPopError::Stopped:
+					throw AsyncEncoder::CancelException{};
 
-				case AsyncEncoder2::TryPopError::Failed:
+				case AsyncEncoder::TryPopError::Failed:
 					branch.encoder.RethrowIfFailed();
 					throw std::logic_error("AsyncEncoder::TryPop returned Failed but no exception was stored");
 				}
@@ -188,18 +188,18 @@ private:
 			auto pushResult = branch.encoder.TryPush(std::move(*branch.pendingFrame));
 			switch (pushResult)
 			{
-			case AsyncEncoder2::TryPushResult::Ok:
+			case AsyncEncoder::TryPushResult::Ok:
 				branch.pendingFrame.reset();
 				progress = true;
 				break;
 
-			case AsyncEncoder2::TryPushResult::Full:
+			case AsyncEncoder::TryPushResult::Full:
 				return progress;
 
-			case AsyncEncoder2::TryPushResult::Stopped:
-				throw AsyncEncoder2::CancelException{};
+			case AsyncEncoder::TryPushResult::Stopped:
+				throw AsyncEncoder::CancelException{};
 
-			case AsyncEncoder2::TryPushResult::Failed:
+			case AsyncEncoder::TryPushResult::Failed:
 				branch.encoder.RethrowIfFailed();
 				throw std::logic_error("AsyncEncoder::TryPush returned Failed but no exception was stored");
 			}
@@ -213,13 +213,13 @@ private:
 			{
 				switch (popResult.error())
 				{
-				case AsyncDecoder2::TryPopError::Empty:
+				case AsyncDecoder::TryPopError::Empty:
 					return progress;
 
-				case AsyncDecoder2::TryPopError::Stopped:
-					throw AsyncDecoder2::CancelException{};
+				case AsyncDecoder::TryPopError::Stopped:
+					throw AsyncDecoder::CancelException{};
 
-				case AsyncDecoder2::TryPopError::Failed:
+				case AsyncDecoder::TryPopError::Failed:
 					branch.decoder.RethrowIfFailed();
 					throw std::logic_error("AsyncDecoder::TryPop returned Failed but no exception was stored");
 				}
@@ -245,18 +245,18 @@ private:
 			auto pushResult = branch.encoder.TryPush(std::move(frame));
 			switch (pushResult)
 			{
-			case AsyncEncoder2::TryPushResult::Ok:
+			case AsyncEncoder::TryPushResult::Ok:
 				progress = true;
 				break;
 
-			case AsyncEncoder2::TryPushResult::Full:
+			case AsyncEncoder::TryPushResult::Full:
 				branch.pendingFrame = std::move(frame);
 				return true;
 
-			case AsyncEncoder2::TryPushResult::Stopped:
-				throw AsyncEncoder2::CancelException{};
+			case AsyncEncoder::TryPushResult::Stopped:
+				throw AsyncEncoder::CancelException{};
 
-			case AsyncEncoder2::TryPushResult::Failed:
+			case AsyncEncoder::TryPushResult::Failed:
 				branch.encoder.RethrowIfFailed();
 				throw std::logic_error("AsyncEncoder::TryPush returned Failed but no exception was stored");
 			}
@@ -270,17 +270,17 @@ private:
 			auto pushResult = branch.decoder.TryPush(std::move(*branch.pendingPacket));
 			switch (pushResult)
 			{
-			case AsyncDecoder2::TryPushResult::Ok:
+			case AsyncDecoder::TryPushResult::Ok:
 				branch.pendingPacket.reset();
 				return true;
 
-			case AsyncDecoder2::TryPushResult::Full:
+			case AsyncDecoder::TryPushResult::Full:
 				return false;
 
-			case AsyncDecoder2::TryPushResult::Stopped:
-				throw AsyncDecoder2::CancelException{};
+			case AsyncDecoder::TryPushResult::Stopped:
+				throw AsyncDecoder::CancelException{};
 
-			case AsyncDecoder2::TryPushResult::Failed:
+			case AsyncDecoder::TryPushResult::Failed:
 				branch.decoder.RethrowIfFailed();
 				throw std::logic_error("AsyncDecoder::TryPush returned Failed but no exception was stored");
 			}
@@ -339,17 +339,17 @@ private:
 		auto pushResult = branch->decoder.TryPush(std::move(packet));
 		switch (pushResult)
 		{
-		case AsyncDecoder2::TryPushResult::Ok:
+		case AsyncDecoder::TryPushResult::Ok:
 			return true;
 
-		case AsyncDecoder2::TryPushResult::Full:
+		case AsyncDecoder::TryPushResult::Full:
 			branch->pendingPacket = std::move(packet);
 			return true;
 
-		case AsyncDecoder2::TryPushResult::Stopped:
-			throw AsyncDecoder2::CancelException{};
+		case AsyncDecoder::TryPushResult::Stopped:
+			throw AsyncDecoder::CancelException{};
 
-		case AsyncDecoder2::TryPushResult::Failed:
+		case AsyncDecoder::TryPushResult::Failed:
 			branch->decoder.RethrowIfFailed();
 			throw std::logic_error("AsyncDecoder::TryPush returned Failed but no exception was stored");
 		}

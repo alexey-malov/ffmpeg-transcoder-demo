@@ -17,9 +17,9 @@ target_compile_definitions(mm_pipeline PRIVATE
 target_sources(mm_pipeline 
   PUBLIC
     FILE_SET cxx_modules TYPE CXX_MODULES FILES
-    "modules/async_transcoder2.ixx"
-    "modules/async_encoder2.ixx"
-    "modules/async_decoder2.ixx"
+    "modules/async_transcoder.ixx"
+    "modules/async_encoder.ixx"
+    "modules/async_decoder.ixx"
     "modules/async_queue.ixx"
     "modules/async_stage.ixx"
     "modules/demuxer.ixx"
