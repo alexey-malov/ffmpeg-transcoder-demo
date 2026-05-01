@@ -2,11 +2,59 @@ export module mm_pipeline.async_queue;
 
 import std;
 
+namespace mm_pipeline::detail
+{
+
+class AsyncQueueBase
+{
+protected:
+	explicit AsyncQueueBase(size_t capacity)
+		: m_capacity{ capacity }
+	{
+		if (capacity == 0)
+			throw std::invalid_argument("capacity must be > 0");
+	}
+
+	AsyncQueueBase(const AsyncQueueBase&) = delete;
+	AsyncQueueBase& operator=(const AsyncQueueBase&) = delete;
+
+	void CloseImpl()
+	{
+		std::lock_guard lock{ m_mutex };
+		m_closed = true;
+
+		m_cvNotEmpty.notify_all();
+		m_cvNotFull.notify_all();
+	}
+
+	[[nodiscard]] bool IsClosedImpl() const noexcept
+	{
+		std::lock_guard lock{ m_mutex };
+		return m_closed;
+	}
+
+	void NotifyAllImpl() noexcept
+	{
+		m_cvNotEmpty.notify_all();
+		m_cvNotFull.notify_all();
+	}
+
+	const size_t m_capacity;
+
+	mutable std::mutex m_mutex;
+	std::condition_variable_any m_cvNotEmpty;
+	std::condition_variable_any m_cvNotFull;
+
+	bool m_closed = false;
+};
+
+} // namespace mm_pipeline::detail
+
 namespace mm_pipeline
 {
 
 export template <typename T>
-class AsyncQueue
+class AsyncQueue : private detail::AsyncQueueBase
 {
 public:
 	enum class TryPushResult
@@ -39,10 +87,8 @@ public:
 	};
 
 	explicit AsyncQueue(size_t capacity)
-		: m_capacity{ capacity }
+		: AsyncQueueBase{ capacity }
 	{
-		if (capacity == 0)
-			throw std::invalid_argument("capacity must be > 0");
 	}
 
 	AsyncQueue(const AsyncQueue&) = delete;
@@ -129,7 +175,6 @@ public:
 			return value;
 		}
 
-		// empty + closed
 		throw Closed{};
 	}
 
@@ -182,6 +227,7 @@ public:
 	{
 		if (maxItems == 0) [[unlikely]]
 			throw std::invalid_argument("maxItems must be greater than 0");
+
 		out.clear();
 
 		std::unique_lock lock{ m_mutex };
@@ -196,7 +242,7 @@ public:
 		if (m_queue.empty() && m_closed)
 			throw Closed{};
 
-		size_t count = std::min(maxItems, m_queue.size());
+		const size_t count = std::min(maxItems, m_queue.size());
 
 		for (size_t i = 0; i < count; ++i)
 		{
@@ -216,23 +262,17 @@ public:
 
 	void Close()
 	{
-		std::lock_guard lock{ m_mutex };
-		m_closed = true;
-
-		m_cvNotEmpty.notify_all();
-		m_cvNotFull.notify_all();
+		CloseImpl();
 	}
 
 	[[nodiscard]] bool IsClosed() const noexcept
 	{
-		std::lock_guard lock{ m_mutex };
-		return m_closed;
+		return IsClosedImpl();
 	}
 
 	void NotifyAll() noexcept
 	{
-		m_cvNotEmpty.notify_all();
-		m_cvNotFull.notify_all();
+		NotifyAllImpl();
 	}
 
 private:
@@ -255,14 +295,7 @@ private:
 		return TryPushResult::Ok;
 	}
 
-	const size_t m_capacity;
-
-	mutable std::mutex m_mutex;
-	std::condition_variable_any m_cvNotEmpty;
-	std::condition_variable_any m_cvNotFull;
-
 	std::deque<T> m_queue;
-	bool m_closed = false;
 };
 
 } // namespace mm_pipeline
