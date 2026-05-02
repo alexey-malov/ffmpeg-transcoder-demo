@@ -117,7 +117,7 @@ class AsyncStage : private detail::AsyncStageBase
 {
 public:
 	using CancelException = AsyncStageBase::CancelException;
-	
+
 	enum class TryPushResult
 	{
 		Ok,
@@ -287,6 +287,7 @@ private:
 			while (true)
 			{
 				m_inputQueue.PopAllOrWait(batch, stopToken);
+				m_pipelineNotifier.Notify();
 
 				for (Input& input : batch)
 				{
