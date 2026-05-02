@@ -122,15 +122,11 @@ public:
 	{
 		Ok,
 		Full,
-		Stopped,
-		Failed
 	};
 
 	enum class TryPopError
 	{
 		Empty,
-		Stopped,
-		Failed
 	};
 
 	AsyncStage(Processor processor, size_t inputCapacity, size_t outputCapacity, PipelineNotifier& notifier)
@@ -188,9 +184,9 @@ public:
 		case State::Finished:
 			throw std::logic_error("AsyncStage is not running");
 		case State::Stopped:
-			return TryPushResult::Stopped;
+			throw CancelException{};
 		case State::Failed:
-			return TryPushResult::Failed;
+			std::rethrow_exception(m_workerException);
 		case State::Running:
 			break;
 		}
@@ -207,7 +203,7 @@ public:
 		case InputQueue::TryPushResult::Full:
 			return TryPushResult::Full;
 		case InputQueue::TryPushResult::Closed:
-			return TryPushResult::Stopped;
+			throw CancelException{};
 		}
 
 		std::unreachable();
@@ -250,16 +246,12 @@ public:
 		{
 		case State::Finished:
 			return Output::Null();
-
 		case State::Stopped:
-			return std::unexpected(TryPopError::Stopped);
-
+			throw CancelException{};
 		case State::Failed:
-			return std::unexpected(TryPopError::Failed);
-
-		default:
-			throw std::logic_error("AsyncStage::TryPop invalid state");
+			std::rethrow_exception(m_workerException);
 		}
+		std::unreachable();
 	}
 
 	Processor& GetProcessor() noexcept

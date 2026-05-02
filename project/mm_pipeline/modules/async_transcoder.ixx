@@ -154,13 +154,6 @@ private:
 				{
 				case AsyncEncoder::TryPopError::Empty:
 					return progress;
-
-				case AsyncEncoder::TryPopError::Stopped:
-					throw AsyncEncoder::CancelException{};
-
-				case AsyncEncoder::TryPopError::Failed:
-					branch.encoder.RethrowIfFailed();
-					throw std::logic_error("AsyncEncoder::TryPop returned Failed but no exception was stored");
 				}
 			}
 
@@ -194,14 +187,7 @@ private:
 				break;
 
 			case AsyncEncoder::TryPushResult::Full:
-				return progress;
-
-			case AsyncEncoder::TryPushResult::Stopped:
-				throw AsyncEncoder::CancelException{};
-
-			case AsyncEncoder::TryPushResult::Failed:
-				branch.encoder.RethrowIfFailed();
-				throw std::logic_error("AsyncEncoder::TryPush returned Failed but no exception was stored");
+				return false;
 			}
 		}
 
@@ -215,13 +201,6 @@ private:
 				{
 				case AsyncDecoder::TryPopError::Empty:
 					return progress;
-
-				case AsyncDecoder::TryPopError::Stopped:
-					throw AsyncDecoder::CancelException{};
-
-				case AsyncDecoder::TryPopError::Failed:
-					branch.decoder.RethrowIfFailed();
-					throw std::logic_error("AsyncDecoder::TryPop returned Failed but no exception was stored");
 				}
 			}
 
@@ -252,13 +231,6 @@ private:
 			case AsyncEncoder::TryPushResult::Full:
 				branch.pendingFrame = std::move(frame);
 				return true;
-
-			case AsyncEncoder::TryPushResult::Stopped:
-				throw AsyncEncoder::CancelException{};
-
-			case AsyncEncoder::TryPushResult::Failed:
-				branch.encoder.RethrowIfFailed();
-				throw std::logic_error("AsyncEncoder::TryPush returned Failed but no exception was stored");
 			}
 		}
 	}
@@ -276,13 +248,6 @@ private:
 
 			case AsyncDecoder::TryPushResult::Full:
 				return false;
-
-			case AsyncDecoder::TryPushResult::Stopped:
-				throw AsyncDecoder::CancelException{};
-
-			case AsyncDecoder::TryPushResult::Failed:
-				branch.decoder.RethrowIfFailed();
-				throw std::logic_error("AsyncDecoder::TryPush returned Failed but no exception was stored");
 			}
 		}
 		return std::nullopt;
@@ -345,13 +310,6 @@ private:
 		case AsyncDecoder::TryPushResult::Full:
 			branch->pendingPacket = std::move(packet);
 			return true;
-
-		case AsyncDecoder::TryPushResult::Stopped:
-			throw AsyncDecoder::CancelException{};
-
-		case AsyncDecoder::TryPushResult::Failed:
-			branch->decoder.RethrowIfFailed();
-			throw std::logic_error("AsyncDecoder::TryPush returned Failed but no exception was stored");
 		}
 
 		throw std::logic_error("AsyncDecoder::TryPush returned invalid result");
