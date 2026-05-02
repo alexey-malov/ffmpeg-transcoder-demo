@@ -14,13 +14,12 @@ import ffmpeg.codec;
 namespace mm_pipeline
 {
 
-export template <class Processor, class Input, class Output>
-class AsyncStage
+namespace detail
+{
+
+class AsyncStageBase
 {
 public:
-	using InputQueue = AsyncQueue<Input>;
-	using OutputQueue = AsyncQueue<Output>;
-
 	struct CancelException : public std::exception
 	{
 		const char* what() const noexcept override
@@ -44,24 +43,43 @@ public:
 		Failed
 	};
 
-	AsyncStage(Processor processor, size_t inputCapacity, size_t outputCapacity, PipelineNotifier& notifier)
-		: m_inputQueue{ inputCapacity }
-		, m_outputQueue{ outputCapacity }
-		, m_pipelineNotifier{ notifier }
-		, m_processor{ std::move(processor) }
+protected:
+	enum class State
+	{
+		NotStarted,
+		Running,
+		Finished,
+		Stopped,
+		Failed,
+	};
+
+	explicit AsyncStageBase(PipelineNotifier& notifier)
+		: m_pipelineNotifier{ notifier }
 	{
 	}
 
-	AsyncStage(const AsyncStage&) = delete;
-	AsyncStage& operator=(const AsyncStage&) = delete;
+	// This class is not intended for polymorphic deletion
+	~AsyncStageBase() = default;
 
-	~AsyncStage()
+	void JoinImpl()
 	{
-		RequestStop();
-		Join();
+		if (m_workerThread.joinable())
+		{
+			m_workerThread.join();
+		}
 	}
 
-	void Start()
+	std::stop_token GetWorkerThreadStopToken() const noexcept
+	{
+		return m_workerThread.get_stop_token();
+	}
+
+	void RequestStopImpl() noexcept
+	{
+		m_workerThread.request_stop();
+	}
+
+	void StartImpl()
 	{
 		State expected = State::NotStarted;
 		if (!m_state.compare_exchange_strong(expected, State::Running, std::memory_order::acq_rel))
@@ -71,7 +89,7 @@ public:
 
 		try
 		{
-			m_workerThread = std::jthread{ std::bind_front(&AsyncStage::WorkerThreadFunc, this) };
+			m_workerThread = std::jthread{ std::bind_front(&AsyncStageBase::WorkerThreadFunc, this) };
 		}
 		catch (...)
 		{
@@ -80,23 +98,7 @@ public:
 		}
 	}
 
-	void Join()
-	{
-		if (m_workerThread.joinable())
-		{
-			m_workerThread.join();
-		}
-	}
-
-	void RequestStop()
-	{
-		m_workerThread.request_stop();
-		m_inputQueue.NotifyAll();
-		m_outputQueue.NotifyAll();
-		m_pipelineNotifier.Notify();
-	}
-
-	void RethrowIfFailed()
+	void RethrowIfFailedImpl()
 	{
 		switch (m_state.load(std::memory_order_acquire))
 		{
@@ -113,6 +115,66 @@ public:
 		default:
 			return;
 		}
+	}
+
+	PipelineNotifier& m_pipelineNotifier;
+	std::exception_ptr m_workerException;
+	std::atomic<State> m_state = State::NotStarted;
+
+private:
+	virtual void WorkerThreadFunc(std::stop_token stoken) = 0;
+
+	std::jthread m_workerThread;
+};
+
+} // namespace detail
+
+export template <class Processor, class Input, class Output>
+class AsyncStage : private detail::AsyncStageBase
+{
+public:
+	using CancelException = AsyncStageBase::CancelException;
+	using TryPushResult = AsyncStageBase::TryPushResult;
+	using TryPopError = AsyncStageBase::TryPopError;
+
+	AsyncStage(Processor processor, size_t inputCapacity, size_t outputCapacity, PipelineNotifier& notifier)
+		: AsyncStageBase{ notifier }
+		, m_inputQueue{ inputCapacity }
+		, m_outputQueue{ outputCapacity }
+		, m_processor{ std::move(processor) }
+	{
+	}
+
+	AsyncStage(const AsyncStage&) = delete;
+	AsyncStage& operator=(const AsyncStage&) = delete;
+
+	~AsyncStage()
+	{
+		RequestStop();
+		Join();
+	}
+
+	void Join()
+	{
+		JoinImpl();
+	}
+
+	void Start()
+	{
+		StartImpl();
+	}
+
+	void RequestStop()
+	{
+		RequestStopImpl();
+		m_inputQueue.NotifyAll();
+		m_outputQueue.NotifyAll();
+		m_pipelineNotifier.Notify();
+	}
+
+	void RethrowIfFailed()
+	{
+		return RethrowIfFailedImpl();
 	}
 
 	// On Ok, the item is consumed.
@@ -167,7 +229,7 @@ public:
 			throw std::logic_error("Cannot close AsyncStage input when it is not running");
 		}
 
-		m_inputQueue.PushOrWait(Input::Null(), m_workerThread.get_stop_token());
+		m_inputQueue.PushOrWait(Input::Null(), GetWorkerThreadStopToken());
 		m_inputClosed = true;
 	}
 
@@ -215,19 +277,12 @@ public:
 	}
 
 private:
-	enum class State
-	{
-		NotStarted,
-		Running,
-		Finished,
-		Stopped,
-		Failed,
-	};
-
+	using InputQueue = AsyncQueue<Input>;
+	using OutputQueue = AsyncQueue<Output>;
 	using SendResult = ffmpeg::SendResult;
 	using ReceiveResult = ffmpeg::ReceiveResult;
 
-	void WorkerThreadFunc(std::stop_token stopToken)
+	void WorkerThreadFunc(std::stop_token stopToken) override
 	{
 		try
 		{
@@ -302,17 +357,8 @@ private:
 
 	InputQueue m_inputQueue;
 	OutputQueue m_outputQueue;
-
-	PipelineNotifier& m_pipelineNotifier;
-
 	Processor m_processor;
-
 	bool m_inputClosed = false;
-
-	std::exception_ptr m_workerException;
-	std::atomic<State> m_state = State::NotStarted;
-
-	std::jthread m_workerThread;
 };
 
 } // namespace mm_pipeline
