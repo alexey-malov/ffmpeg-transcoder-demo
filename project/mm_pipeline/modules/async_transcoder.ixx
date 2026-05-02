@@ -174,17 +174,12 @@ private:
 		// 1. Сначала пытаемся протолкнуть ранее не принятый encoder-ом frame.
 		if (branch.pendingFrame)
 		{
-			auto pushResult = branch.encoder.TryPush(std::move(*branch.pendingFrame));
-			switch (pushResult)
+			if (!branch.encoder.TryPush(std::move(*branch.pendingFrame)))
 			{
-			case AsyncEncoder::TryPushResult::Ok:
-				branch.pendingFrame.reset();
-				progress = true;
-				break;
-
-			case AsyncEncoder::TryPushResult::Full:
 				return false;
 			}
+			branch.pendingFrame.reset();
+			progress = true;
 		}
 
 		// 2. Read new frames from decoder
@@ -195,6 +190,7 @@ private:
 			{
 				return progress;
 			}
+			progress = true;
 
 			Frame frame = std::move(*popResult);
 
@@ -213,14 +209,8 @@ private:
 
 			frameProcessor(frame);
 
-			auto pushResult = branch.encoder.TryPush(std::move(frame));
-			switch (pushResult)
+			if (!branch.encoder.TryPush(std::move(frame)))
 			{
-			case AsyncEncoder::TryPushResult::Ok:
-				progress = true;
-				break;
-
-			case AsyncEncoder::TryPushResult::Full:
 				branch.pendingFrame = std::move(frame);
 				return true;
 			}
@@ -230,17 +220,13 @@ private:
 	static std::optional<bool> TryFlushPendingPacket(Branch& branch)
 	{
 		if (branch.pendingPacket)
-		{
-			auto pushResult = branch.decoder.TryPush(std::move(*branch.pendingPacket));
-			switch (pushResult)
+		{			
+			if (!branch.decoder.TryPush(std::move(*branch.pendingPacket)))
 			{
-			case AsyncDecoder::TryPushResult::Ok:
-				branch.pendingPacket.reset();
-				return true;
-
-			case AsyncDecoder::TryPushResult::Full:
 				return false;
 			}
+			branch.pendingPacket.reset();
+			return true;
 		}
 		return std::nullopt;
 	}
@@ -262,13 +248,7 @@ private:
 			return *flushResult;
 		}
 
-		auto readResult = m_demuxer.TryRead();
-		if (!readResult)
-		{
-			throw Exception{ readResult.error() };
-		}
-
-		auto& packet = *readResult;
+		auto packet = m_demuxer.Read();
 
 		if (!packet)
 		{
@@ -293,18 +273,11 @@ private:
 			return true;
 		}
 
-		auto pushResult = branch->decoder.TryPush(std::move(packet));
-		switch (pushResult)
+		if (!branch->decoder.TryPush(std::move(packet)))
 		{
-		case AsyncDecoder::TryPushResult::Ok:
-			return true;
-
-		case AsyncDecoder::TryPushResult::Full:
 			branch->pendingPacket = std::move(packet);
-			return true;
 		}
-
-		throw std::logic_error("AsyncDecoder::TryPush returned invalid result");
+		return true;
 	}
 
 	void CloseDecoders()

@@ -118,12 +118,6 @@ class AsyncStage : private detail::AsyncStageBase
 public:
 	using CancelException = AsyncStageBase::CancelException;
 
-	enum class TryPushResult
-	{
-		Ok,
-		Full,
-	};
-
 	AsyncStage(Processor processor, size_t inputCapacity, size_t outputCapacity, PipelineNotifier& notifier)
 		: AsyncStageBase{ notifier }
 		, m_inputQueue{ inputCapacity }
@@ -164,9 +158,9 @@ public:
 		return RethrowIfFailedImpl();
 	}
 
-	// On Ok, the item is consumed.
-	// On Full, Stopped, or Failed, the item is not consumed and remains valid.
-	TryPushResult TryPush(Input&& input)
+	// On Ok, the input is consumed and true is returned
+	// On Full, item is not consumed and false is returned
+	bool TryPush(Input&& input)
 	{
 		if (!input) [[unlikely]]
 		{
@@ -194,9 +188,9 @@ public:
 		switch (m_inputQueue.TryPush(std::move(input)))
 		{
 		case InputQueue::TryPushResult::Ok:
-			return TryPushResult::Ok;
+			return true;
 		case InputQueue::TryPushResult::Full:
-			return TryPushResult::Full;
+			return false;
 		case InputQueue::TryPushResult::Closed:
 			throw CancelException{};
 		}
