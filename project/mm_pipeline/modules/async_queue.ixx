@@ -2,7 +2,10 @@ export module mm_pipeline.async_queue;
 
 import std;
 
-namespace mm_pipeline::detail
+namespace mm_pipeline
+{
+
+namespace detail
 {
 
 class AsyncQueueBase
@@ -47,11 +50,7 @@ protected:
 
 	bool m_closed = false;
 };
-
-} // namespace mm_pipeline::detail
-
-namespace mm_pipeline
-{
+} // namespace detail
 
 export template <typename T>
 class AsyncQueue : private detail::AsyncQueueBase
