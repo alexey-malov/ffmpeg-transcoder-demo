@@ -19,7 +19,7 @@ namespace detail
 
 class AsyncStageBase
 {
-public:
+protected:
 	struct CancelException : public std::exception
 	{
 		const char* what() const noexcept override
@@ -27,23 +27,6 @@ public:
 			return "AsyncStage operation cancelled";
 		}
 	};
-
-	enum class TryPushResult
-	{
-		Ok,
-		Full,
-		Stopped,
-		Failed
-	};
-
-	enum class TryPopError
-	{
-		Empty,
-		Stopped,
-		Failed
-	};
-
-protected:
 	enum class State
 	{
 		NotStarted,
@@ -134,8 +117,21 @@ class AsyncStage : private detail::AsyncStageBase
 {
 public:
 	using CancelException = AsyncStageBase::CancelException;
-	using TryPushResult = AsyncStageBase::TryPushResult;
-	using TryPopError = AsyncStageBase::TryPopError;
+	
+	enum class TryPushResult
+	{
+		Ok,
+		Full,
+		Stopped,
+		Failed
+	};
+
+	enum class TryPopError
+	{
+		Empty,
+		Stopped,
+		Failed
+	};
 
 	AsyncStage(Processor processor, size_t inputCapacity, size_t outputCapacity, PipelineNotifier& notifier)
 		: AsyncStageBase{ notifier }
