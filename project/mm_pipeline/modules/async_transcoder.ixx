@@ -150,11 +150,7 @@ private:
 			auto popResult = branch.encoder.TryPop();
 			if (!popResult)
 			{
-				switch (popResult.error())
-				{
-				case AsyncEncoder::TryPopError::Empty:
-					return progress;
-				}
+				return progress;
 			}
 
 			auto pkt = std::move(*popResult);
@@ -197,11 +193,7 @@ private:
 			auto popResult = branch.decoder.TryPop();
 			if (!popResult)
 			{
-				switch (popResult.error())
-				{
-				case AsyncDecoder::TryPopError::Empty:
-					return progress;
-				}
+				return progress;
 			}
 
 			Frame frame = std::move(*popResult);

@@ -124,11 +124,6 @@ public:
 		Full,
 	};
 
-	enum class TryPopError
-	{
-		Empty,
-	};
-
 	AsyncStage(Processor processor, size_t inputCapacity, size_t outputCapacity, PipelineNotifier& notifier)
 		: AsyncStageBase{ notifier }
 		, m_inputQueue{ inputCapacity }
@@ -225,7 +220,7 @@ public:
 		m_inputClosed = true;
 	}
 
-	std::expected<Output, TryPopError> TryPop()
+	std::optional<Output> TryPop()
 	{
 		auto result = m_outputQueue.TryPop();
 		if (result)
@@ -236,7 +231,7 @@ public:
 		switch (result.error())
 		{
 		case OutputQueue::TryPopError::Empty:
-			return std::unexpected(TryPopError::Empty);
+			return std::nullopt;
 
 		case OutputQueue::TryPopError::Closed:
 			break;
