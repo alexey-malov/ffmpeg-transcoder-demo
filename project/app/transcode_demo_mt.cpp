@@ -140,6 +140,8 @@ int main(int argc, char* argv[])
 		videoCtx->time_base = videoEncTimeBase.ToAV();
 		videoCtx->framerate = fps;
 		videoCtx->gop_size = (fps.num / fps.den) * 2; // 2 seconds
+		//videoCtx->thread_count = 0; // auto-detect threading based on codec capabilities
+		//videoCtx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
 		videoCtx->max_b_frames = 2;
 		videoCtx->pkt_timebase = videoCtx->time_base; // Ensure packet time_base matches encoder time_base
 
@@ -177,19 +179,12 @@ int main(int argc, char* argv[])
 
 		// Open encoders
 		ffmpeg::Dictionary videoOpts;
-		auto videoSetPreset = videoOpts.TrySet("preset", "medium");
-		if (!videoSetPreset)
-		{
-			std::cerr << "Failed to set preset: " << videoSetPreset.error().code << "\n";
-			return 1;
-		}
-		auto videoSetCrf = videoOpts.TrySet("crf", "23");
-		if (!videoSetCrf)
-		{
-			std::cerr << "Failed to set crf: " << videoSetCrf.error().code << "\n";
-			return 1;
-		}
-
+		videoOpts.Set("preset", "medium");
+		videoOpts.Set("crf", "23");
+		// videoOpts.Set("threads", "0");
+		// videoOpts.Set("lookahead_threads", "4");
+		// videoOpts.Set("rc_lookahead", "40");
+		//videoOpts.Set("sliced_threads", "0");
 		auto videoOpenResult = videoEnc.TryOpen(videoOpts.Ptr());
 		if (!videoOpenResult)
 		{
@@ -237,8 +232,8 @@ int main(int argc, char* argv[])
 
 		mm_pipeline::AsyncDecoder asyncAudioDecoder{ std::move(audioDec), 10, 10, notifier };
 		mm_pipeline::AsyncEncoder asyncAudioEncoder{ std::move(audioEnc), 10, 10, notifier };
-		mm_pipeline::AsyncDecoder asyncVideoDecoder{ std::move(videoDec), 12, 16, notifier };
-		mm_pipeline::AsyncEncoder asyncVideoEncoder{ std::move(videoEnc), 32, 4, notifier };
+		mm_pipeline::AsyncDecoder asyncVideoDecoder{ std::move(videoDec), 16, 16, notifier };
+		mm_pipeline::AsyncEncoder asyncVideoEncoder{ std::move(videoEnc), 16, 16, notifier };
 
 		mm_pipeline::AsyncTranscoder asyncTranscoder{
 			muxer, demuxer,
@@ -257,7 +252,7 @@ int main(int argc, char* argv[])
 		auto end = Clock::now();
 
 		std::cout << "Finished in " << duration<double>(end - start).count() << " s.\n";
-
+		std::cout << "Total wait time: " << duration<double>(notifier.totalWaitTime).count() << " s.\n";
 		// Step 6: Close muxer
 		muxer.Close();
 

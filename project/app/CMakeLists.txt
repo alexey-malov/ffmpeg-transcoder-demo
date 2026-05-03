@@ -34,8 +34,6 @@ copy_runtime_dlls(ffmpeg_demo
   FFmpeg::swresample
 )
 
-
-
 # Transcode demo executable
 add_executable(transcode_demo)
 

@@ -30,7 +30,7 @@ public:
 
 	AsyncTranscoder(Muxer& muxer, Demuxer& demuxer,
 		const BranchConfig& video, const BranchConfig& audio,
-		mm_pipeline::PipelineNotifier& pipelineNotifier)
+		PipelineNotifier& pipelineNotifier)
 		: m_muxer{ muxer }
 		, m_demuxer{ demuxer }
 		, m_video{ video.decoder, video.encoder, video.streamIndex, video.track }
@@ -131,7 +131,6 @@ private:
 		bool encoderEof = false;
 
 		std::optional<Packet> pendingPacket;
-
 		std::optional<Frame> pendingFrame;
 	};
 
@@ -167,11 +166,10 @@ private:
 		}
 	}
 
-	bool DrainDecoder(Branch& branch, const FrameProcessor& frameProcessor)
+	static bool DrainDecoder(Branch& branch, const FrameProcessor& frameProcessor)
 	{
 		bool progress = false;
 
-		// 1. Сначала пытаемся протолкнуть ранее не принятый encoder-ом frame.
 		if (branch.pendingFrame)
 		{
 			if (!branch.encoder.TryPush(std::move(*branch.pendingFrame)))
@@ -182,7 +180,6 @@ private:
 			progress = true;
 		}
 
-		// 2. Read new frames from decoder
 		while (true)
 		{
 			auto popResult = branch.decoder.TryPop();
@@ -220,7 +217,7 @@ private:
 	static std::optional<bool> TryFlushPendingPacket(Branch& branch)
 	{
 		if (branch.pendingPacket)
-		{			
+		{
 			if (!branch.decoder.TryPush(std::move(*branch.pendingPacket)))
 			{
 				return false;
@@ -300,7 +297,7 @@ private:
 	Branch m_video;
 	Branch m_audio;
 
-	mm_pipeline::PipelineNotifier& m_pipelineNotifier;
+	PipelineNotifier& m_pipelineNotifier;
 
 	bool m_demuxEof = false;
 
