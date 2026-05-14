@@ -4,6 +4,8 @@ import std;
 namespace ffmpeg
 {
 
+const std::error_category& GetFFmpegErrorCategory() noexcept;
+
 export struct Error final
 {
 	int code = 0;
@@ -13,6 +15,8 @@ export struct Error final
 	{
 		return code >= 0;
 	}
+
+	std::error_code ToErrorCode() const noexcept;
 };
 
 static_assert(sizeof(Error) <= 16, "Error struct size must not exceed 16 bytes");
