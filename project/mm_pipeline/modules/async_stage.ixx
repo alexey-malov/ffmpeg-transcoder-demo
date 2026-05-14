@@ -118,11 +118,13 @@ class AsyncStage : private detail::AsyncStageBase
 public:
 	using CancelException = AsyncStageBase::CancelException;
 
-	AsyncStage(Processor processor, size_t inputCapacity, size_t outputCapacity, PipelineNotifier& notifier)
+	AsyncStage(Processor processor, size_t inputCapacity, size_t outputCapacity, PipelineNotifier& notifier,
+		std::string name = {})
 		: AsyncStageBase{ notifier }
 		, m_inputQueue{ inputCapacity }
 		, m_outputQueue{ outputCapacity }
 		, m_processor{ std::move(processor) }
+		, m_name{ std::move(name) }
 	{
 	}
 
@@ -210,7 +212,8 @@ public:
 			throw std::logic_error("Cannot close AsyncStage input when it is not running");
 		}
 
-		m_inputQueue.PushOrWait(Input::Null(), GetWorkerThreadStopToken());
+		[[maybe_unused]] auto result = m_inputQueue.TryPush(Input::Null(), /*ignoreCapacity=*/true);
+		assert(result == InputQueue::TryPushResult::Ok);
 		m_inputClosed = true;
 	}
 
@@ -270,8 +273,11 @@ private:
 				m_inputQueue.PopAllOrWait(batch, stopToken);
 				m_pipelineNotifier.Notify();
 
-				for (Input& input : batch)
+				while (!batch.empty())
 				{
+					auto input = std::move(batch.front());
+					batch.pop_front();
+
 					const bool eof = !input;
 
 					ProcessInput(input, stopToken);
@@ -280,6 +286,12 @@ private:
 					{
 						CloseOutput(State::Finished);
 						return;
+					}
+
+					if (auto tryPopResult = m_inputQueue.TryPop())
+					{
+						batch.push_back(std::move(*tryPopResult));
+						m_pipelineNotifier.Notify();
 					}
 				}
 			}
@@ -337,6 +349,7 @@ private:
 	OutputQueue m_outputQueue;
 	Processor m_processor;
 	bool m_inputClosed = false;
+	std::string m_name;
 };
 
 } // namespace mm_pipeline
