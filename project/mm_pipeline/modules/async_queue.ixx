@@ -97,14 +97,14 @@ public:
 	// Try API (non-blocking)
 	// =======================
 
-	TryPushResult TryPush(const T& value)
+	TryPushResult TryPush(const T& value, bool ignoreCapacity = false)
 	{
-		return TryPushImpl(value);
+		return TryPushImpl(value, ignoreCapacity);
 	}
 
-	TryPushResult TryPush(T&& value)
+	TryPushResult TryPush(T&& value, bool ignoreCapacity = false)
 	{
-		return TryPushImpl(std::move(value));
+		return TryPushImpl(std::move(value), ignoreCapacity);
 	}
 
 	std::expected<T, TryPopError> TryPop()
@@ -276,14 +276,14 @@ public:
 
 private:
 	template <class U>
-	TryPushResult TryPushImpl(U&& value)
+	TryPushResult TryPushImpl(U&& value, bool ignoreCapacity)
 	{
 		std::unique_lock lock{ m_mutex };
 
 		if (m_closed)
 			return TryPushResult::Closed;
 
-		if (m_queue.size() >= m_capacity)
+		if (!ignoreCapacity && m_queue.size() >= m_capacity)
 			return TryPushResult::Full;
 
 		m_queue.emplace_back(std::forward<U>(value));
