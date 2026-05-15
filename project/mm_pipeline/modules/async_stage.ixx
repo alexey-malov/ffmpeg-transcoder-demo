@@ -288,11 +288,13 @@ private:
 						return;
 					}
 
+					#if 0
 					if (auto tryPopResult = m_inputQueue.TryPop())
 					{
 						batch.push_back(std::move(*tryPopResult));
 						m_pipelineNotifier.Notify();
 					}
+					#endif
 				}
 			}
 		}

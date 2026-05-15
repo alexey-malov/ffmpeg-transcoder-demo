@@ -230,10 +230,10 @@ int main(int argc, char* argv[])
 
 		mm_pipeline::PipelineNotifier notifier;
 
-		mm_pipeline::AsyncDecoder asyncAudioDecoder{ std::move(audioDec), 10, 10, notifier };
-		mm_pipeline::AsyncEncoder asyncAudioEncoder{ std::move(audioEnc), 10, 10, notifier };
-		mm_pipeline::AsyncDecoder asyncVideoDecoder{ std::move(videoDec), 16, 16, notifier };
-		mm_pipeline::AsyncEncoder asyncVideoEncoder{ std::move(videoEnc), 16, 16, notifier };
+		mm_pipeline::AsyncDecoder asyncAudioDecoder{ std::move(audioDec), 10, 10, notifier, "audio decoder" };
+		mm_pipeline::AsyncEncoder asyncAudioEncoder{ std::move(audioEnc), 10, 10, notifier, "audio encoder" };
+		mm_pipeline::AsyncDecoder asyncVideoDecoder{ std::move(videoDec), 16, 16, notifier, "video decoder" };
+		mm_pipeline::AsyncEncoder asyncVideoEncoder{ std::move(videoEnc), 16, 16, notifier, "video encoder" };
 
 		mm_pipeline::AsyncTranscoder asyncTranscoder{
 			muxer, demuxer,
